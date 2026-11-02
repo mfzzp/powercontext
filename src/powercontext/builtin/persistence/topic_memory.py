@@ -54,6 +54,7 @@ from powercontext.builtin.persistence.supervision import database_utc_now
 from powercontext.builtin.persistence.tables import (
     ARTIFACT_HEADS_TABLE,
     ARTIFACTS_TABLE,
+    SOURCE_LIFECYCLE_TABLE,
     TOPIC_MEMORY_ACTIVE_CHUNKS_TABLE,
     TOPIC_MEMORY_ACTIVE_TOPICS_TABLE,
     TOPIC_MEMORY_RETRIEVAL_SHAPE_TABLE,
@@ -381,6 +382,14 @@ class TopicMemoryRepository:
                 TOPIC_MEMORY_ACTIVE_TOPICS_TABLE.c.family == TopicMemory.family,
             )
         )
+        statement = statement.where(
+            ~select(SOURCE_LIFECYCLE_TABLE.c.node_id).where(
+                SOURCE_LIFECYCLE_TABLE.c.scope_id == scope_id,
+                SOURCE_LIFECYCLE_TABLE.c.kind == "topic",
+                SOURCE_LIFECYCLE_TABLE.c.artifact_id == TOPIC_MEMORY_ACTIVE_TOPICS_TABLE.c.artifact_id,
+                SOURCE_LIFECYCLE_TABLE.c.available.is_(False),
+            ).exists()
+        )
         if tag_filter is not None:
             statement = statement.where(
                 tag_predicate(
@@ -487,6 +496,23 @@ class TopicMemoryRepository:
             admission=admission,
         )
         channels = await self.index.search(connection, scope_id, request)
+        # Lifecycle changes eligibility, never the immutable Topic revision or
+        # its index. Filter every channel before fusion and final limit so an
+        # unsupported Topic cannot displace a supported one in Context.
+        withdrawn = set(
+            (await connection.execute(
+                select(SOURCE_LIFECYCLE_TABLE.c.artifact_id).where(
+                    SOURCE_LIFECYCLE_TABLE.c.scope_id == scope_id,
+                    SOURCE_LIFECYCLE_TABLE.c.kind == "topic",
+                    SOURCE_LIFECYCLE_TABLE.c.available.is_(False),
+                )
+            )).scalars()
+        )
+        if withdrawn:
+            channels = channels.model_copy(update={
+                key: tuple(hit for hit in getattr(channels, key) if hit.artifact_ref.artifact_id not in withdrawn)
+                for key in ("topic_fts", "topic_vector", "detail_fts", "detail_vector")
+            })
         await self._check_retrieval_shape(connection)
         outcome = _fuse_topic_memory_rankings(query, channels, limit, mode=used_mode, admission=admission)
         return TopicMemorySearchResult(
