@@ -168,6 +168,26 @@ class PDFSearchTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(limit=limit), self.assertRaises(ValueError):
                 await search_pdf_pages(memory, "revenue", limit)
 
+    async def test_corporate_suffix_does_not_match_income_and_alphanumeric_company_is_recognized(self):
+        from powercontext.sources.pdf_pages import _document_matches
+
+        self.assertFalse(_document_matches("OTHER_INC_2022_10K", "What was 3M net income in 2022?"))
+        self.assertFalse(_document_matches("AIR_2022_10K", "What was the impairment expense?"))
+        self.assertTrue(_document_matches("3M_2022_10K", "What was 3M net income in 2022?"))
+        self.assertTrue(_document_matches("ACME_INC_2022_10K", "What was Acme net income?"))
+        memory, records = self.memory([
+            "3M_2022_10K\nConsolidated statements of income. Net income 120.",
+            "OTHER_INC_2022_10K\nConsolidated statements of income. Net income 120.",
+        ])
+        self.assertEqual(await search_pdf_pages(memory, "What was 3M net income in 2022?", 1), (records[0].citation,))
+
+    async def test_report_year_disambiguates_otherwise_identical_pages(self):
+        memory, records = self.memory([
+            "ACME_2021_10K\nConsolidated statements of cash flows. Capital expenditures 100.",
+            "ACME_2022_10K\nConsolidated statements of cash flows. Capital expenditures 100.",
+        ])
+        self.assertEqual(await search_pdf_pages(memory, "Acme capital expenditures in 2022", 1), (records[1].citation,))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

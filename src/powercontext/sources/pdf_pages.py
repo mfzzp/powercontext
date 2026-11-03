@@ -47,7 +47,7 @@ def _validate_page(value: PDFPageInput) -> None:
         raise ValueError("PDF document_id must not be blank")
     if re.fullmatch(r"[0-9a-f]{64}", value.document_sha256) is None:
         raise ValueError("PDF digest must be a lowercase SHA-256 hexadecimal string")
-    if value.page_number < 1:
+    if type(value.page_number) is not int or value.page_number < 1:
         raise ValueError("PDF physical page numbers start at 1")
 
 
@@ -151,6 +151,11 @@ _FINANCIAL_CONCEPTS = (
     ("dividend dividends", "dividend distribution shareholder"),
     ("income earnings profit", "income earning profit operation"),
     ("depreciation amortization", "depreciation amortization"),
+    ("buyback buybacks repurchase repurchases", "repurchase treasury stock share"),
+    ("liquidity", "current asset liability cash liquidity"),
+    ("inventory inventories", "inventory inventories"),
+    ("receivable receivables", "receivable account allowance"),
+    ("pension retirement", "pension retirement benefit obligation"),
 )
 
 
@@ -172,7 +177,10 @@ def _terms(text: str) -> list[str]:
 
 def _query_weights(question: str) -> dict[str, float]:
     terms = set(_terms(question))
-    weights = {term: 0.25 if term.isdigit() else 1.0 for term in terms}
+    weights = {
+        term: 0.2 if re.fullmatch(r"(?:19|20)\d{2}", term) else 0.7 if term.isdigit() else 1.0
+        for term in terms
+    }
     for triggers, expansion in _FINANCIAL_CONCEPTS:
         if terms.intersection(_terms(triggers)):
             for term in _terms(expansion):
@@ -180,15 +188,32 @@ def _query_weights(question: str) -> dict[str, float]:
     return weights
 
 
+_CORPORATE_WORDS = frozenset("inc incorporated corp corporation company co ltd limited plc llc holdings group".split())
+
+
 def _document_matches(document_id: str, question: str) -> bool:
-    # IDs commonly combine the company and report year/type. Infer entity hints
-    # from the supplied ID, without a company list or a document lookup table.
-    parts = [
-        part for part in _TOKEN.findall(document_id.lower())
-        if part.isalpha() and len(part) > 2 and part not in _STOP_WORDS
-    ]
-    compact_question = "".join(_TOKEN.findall(question.lower()))
-    return any(part in compact_question for part in parts)
+    # Infer an entity only from the supplied ID, with word boundaries. In
+    # particular, INC must not match income, nor AIR match impairment.
+    company = re.sub(r"(?:19|20)\d{2}|10[\W_]*[kq](?![a-z0-9])", " ", document_id.lower())
+    parts = [part for part in re.findall(r"\d+[a-z]+|[a-z]+", company)
+             if part not in _STOP_WORDS and part not in _CORPORATE_WORDS]
+    if not parts:
+        return False
+    pattern = r"(?<![a-z0-9])" + r"[\W_]*".join(map(re.escape, parts)) + r"(?![a-z0-9])"
+    return re.search(pattern, question, flags=re.IGNORECASE) is not None
+
+
+def _report_year_matches(document_id: str, question: str) -> bool:
+    years = set(re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", question))
+    return bool(years.intersection(re.findall(r"(?:19|20)\d{2}", document_id)))
+
+
+def _retrieval_query(question: str) -> str:
+    # Long questions contain instructions as well as search terms. Keep their
+    # original word forms for the Memory analyzer; local stemming belongs only
+    # to the separate page reranker.
+    terms = list(dict.fromkeys(term for term in _TOKEN.findall(question.lower()) if term not in _STOP_WORDS))
+    return " ".join(terms[:24]) if terms else question
 
 
 def _heading_bonus(title: set[str], query: set[str]) -> float:
@@ -211,7 +236,9 @@ def _heading_bonus(title: set[str], query: set[str]) -> float:
 def _rank_pages(records: list[MemoryEntryRecord], question: str, search_order: dict[str, int]) -> list[int]:
     if not records:
         return []
-    token_lists = [_terms(record.entry.text) for record in records]
+    documents = [record.entry.text.partition("\n")[0] for record in records]
+    bodies = [record.entry.text.partition("\n")[2] for record in records]
+    token_lists = [_terms(body) for body in bodies]
     counts = [Counter(tokens) for tokens in token_lists]
     frequency: Counter[str] = Counter()
     for count in counts:
@@ -219,8 +246,11 @@ def _rank_pages(records: list[MemoryEntryRecord], question: str, search_order: d
     average = sum(map(len, token_lists)) / len(records) or 1.0
     weights = _query_weights(question)
     query_terms = set(_terms(question))
-    doc_matches = [_document_matches(record.entry.text.partition("\n")[0], question) for record in records]
-    any_doc_match = any(doc_matches)
+    doc_matches = [_document_matches(document_id, question) for document_id in documents]
+    idfs = {term: math.log(1.0 + (len(records) - frequency[term] + 0.5) / (frequency[term] + 0.5))
+            for term in weights}
+    query_sequence = _terms(question)
+    query_pairs = set(zip(query_sequence, query_sequence[1:], strict=False))
     scored = []
     for index, (record, tokens, count) in enumerate(zip(records, token_lists, counts, strict=True)):
         score = 0.0
@@ -228,17 +258,26 @@ def _rank_pages(records: list[MemoryEntryRecord], question: str, search_order: d
         for term, weight in weights.items():
             tf = count[term]
             if tf:
-                df = frequency[term]
-                idf = math.log(1.0 + (len(records) - df + 0.5) / (df + 0.5))
-                score += weight * idf * tf * 2.2 / (tf + normalization)
-        title = set(_terms(record.entry.text[:450]))
+                score += weight * idfs[term] * tf * 2.2 / (tf + normalization)
+        # Evidence density and literal phrases complement whole-page BM25,
+        # especially when repeated generic financial words dominate long pages.
+        windows = (set(tokens[start:start + 120]) for start in range(0, len(tokens), 60))
+        proximity = max((sum(weights[term] * idfs[term] for term in window.intersection(weights))
+                         for window in windows), default=0.0)
+        pairs = query_pairs.intersection(zip(tokens, tokens[1:], strict=False))
+        score += 0.3 * proximity + 0.3 * sum(min(idfs.get(a, 0), idfs.get(b, 0)) for a, b in pairs)
+        title = set(_terms(bodies[index][:450]))
         score += 0.15 * sum(weight for term, weight in weights.items() if term in title and not term.isdigit())
         score += _heading_bonus(title, query_terms)
-        lower = record.entry.text.lower()
+        lower = bodies[index].lower()
         if "table of contents" in lower[:800]:
             score *= 0.65
-        if any_doc_match and not doc_matches[index]:
-            score *= 0.05
+        # Positive, bounded priors instead of eliminating every other report
+        # after one possibly ambiguous company-name match.
+        if doc_matches[index]:
+            score *= 2.0
+        if _report_year_matches(documents[index], question):
+            score *= 1.35
         rank = search_order.get(record.entry.entry_id)
         if rank is not None:
             score += 0.05 / (1 + rank)
@@ -258,7 +297,7 @@ async def search_pdf_pages(memory: Any, question: str, limit: int = 10) -> tuple
     from powercontext.builtin.runtime import GetMemoryEntryRequest, SearchMemoryRequest
 
     # Force offline lexical search, even if the deployment has model credentials.
-    hits = await memory.search(SearchMemoryRequest(query=question, limit=max(80, limit * 4), mode="fts"))
+    hits = await memory.search(SearchMemoryRequest(query=_retrieval_query(question), limit=min(100, max(20, limit * 4)), mode="fts"))
     search_order = {hit.entry_id: rank for rank, hit in enumerate(hits.hits)}
     # Public scoped listing supplies corpus statistics and avoids dropping a page
     # solely because a long natural-language query fails FTS admission thresholds.
