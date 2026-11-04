@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>复习接力站</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>复习接力站</h1>
+    <p class="subtitle">解决"隔几天回来，不知道上次哪里不会"的问题</p>
+  </header>
+
+  <section id="help" class="card">
+    <h2>使用说明</h2>
+    <ol>
+      <li>输入一个<strong>存档码</strong>（字母数字下划线连字符，1-64 位），用于保存你的进度。不同存档码互相隔离。</li>
+      <li>选择主题（Python / Git / 数据库），查看题目。</li>
+      <li>思考后点击"查看参考答案"，然后给自己打分：<strong>不会(0) / 模糊(1) / 掌握(2)</strong>。</li>
+      <li>系统自动保存进度，下次输入相同存档码即可继续。</li>
+      <li>"继续复习"页显示薄弱点、已掌握数量和下一题推荐。</li>
+    </ol>
+  </section>
+
+  <section id="archive-section" class="card">
+    <h2>存档码</h2>
+    <div class="row">
+      <input type="text" id="archive-input" placeholder="输入存档码，例如 learner-001" maxlength="64">
+      <button id="archive-btn" onclick="setArchive()">进入</button>
+    </div>
+    <p id="archive-status" class="status"></p>
+  </section>
+
+  <section id="topic-section" class="card" style="display:none">
+    <h2>选择主题</h2>
+    <div id="topic-list" class="topic-grid"></div>
+  </section>
+
+  <section id="question-section" class="card" style="display:none">
+    <h2 id="question-title"></h2>
+    <p id="question-knowledge" class="tag"></p>
+    <p id="question-text" class="question-text"></p>
+    <button id="show-answer-btn" onclick="showAnswer()">查看参考答案</button>
+    <div id="answer-area" style="display:none">
+      <h3>参考答案</h3>
+      <p id="answer-text"></p>
+      <h3>自我评分</h3>
+      <div class="score-btns">
+        <button class="score-btn" data-score="0" onclick="submitScore(0)">不会 (0)</button>
+        <button class="score-btn" data-score="1" onclick="submitScore(1)">模糊 (1)</button>
+        <button class="score-btn" data-score="2" onclick="submitScore(2)">掌握 (2)</button>
+      </div>
+      <p id="submit-status" class="status"></p>
+    </div>
+    <div class="nav-row">
+      <button onclick="backToTopics()">返回主题</button>
+      <button onclick="showContinue()">继续复习</button>
+    </div>
+  </section>
+
+  <section id="continue-section" class="card" style="display:none">
+    <h2>继续复习</h2>
+    <div id="progress-summary"></div>
+    <div id="weak-list"></div>
+    <div id="next-rec"></div>
+    <div id="recent-list"></div>
+    <div class="nav-row">
+      <button onclick="backToTopics()">返回主题</button>
+    </div>
+  </section>
+
+  <footer>
+    <p>复习接力站 · PowerContext 持久化 · <a href="#" onclick="resetArchive();return false;">切换存档码</a></p>
+  </footer>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
