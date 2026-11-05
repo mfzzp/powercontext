@@ -1,0 +1,22 @@
+{
+  "name": "seekdb-stepfun-mini-kb",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"node server.mjs\" \"vite --host 127.0.0.1 --port 5173\"",
+    "server": "node server.mjs",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "seekdb": "^0.1.0-alpha.4"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "vite": "^7.1.7"
+  }
+}
