@@ -20,6 +20,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(json.loads(encode_prepare("p1", "t1", action)["body"])["action"], action)
         payload = encode_commit("p1", "t1", action, "固定台词", 0)
         self.assertEqual(json.loads(payload["body"])["reply"], "固定台词")
+        prior = {"sequence": 1, "action": action, "reply": "上一轮模型台词，不应重新作为待续写正文"}
+        prepared = decode_prepare(json.dumps({"history": json.dumps([prior]), "base_sequence": 1,
+                                              "remembered_turns": 1}), 200)
+        self.assertEqual(json.loads(prepared["history"]), [{"sequence": 1, "action": action}])
+        self.assertEqual(prepared["base_sequence"], 1)
         for status in (401, 409, 500):
             with self.assertRaises(ValueError):
                 decode_prepare('{"error":"failed"}', status)

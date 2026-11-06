@@ -1,0 +1,20 @@
+{
+  "llama": {
+    "version": "b12144",
+    "url": "https://api.github.com/repos/ggml-org/llama.cpp/releases/assets/715808767",
+    "filename": "llama-b12144-bin-ubuntu-x64.tar.gz",
+    "size": 23084864,
+    "sha256": "eb003cfeda7c9bf0163bc0c9da650c86bbc28e4f178a5f7d2685ea13536163de",
+    "github_asset": true
+  },
+  "model": {
+    "model_id": "Qwen/Qwen3-1.7B-GGUF",
+    "alias": "qwen3-1.7b",
+    "revision": "90862c4b9d2787eaed51d12237eafdfe7c5f6077",
+    "url": "https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/90862c4b9d2787eaed51d12237eafdfe7c5f6077/Qwen3-1.7B-Q8_0.gguf",
+    "filename": "Qwen3-1.7B-Q8_0.gguf",
+    "size": 1834426016,
+    "sha256": "061b54daade076b5d3362dac252678d17da8c68f07560be70818cace6590cb1a",
+    "license": "Apache-2.0"
+  }
+}

@@ -11,8 +11,15 @@ def decode_prepare(body: str, status_code: int) -> dict:
     if int(status_code) != 200:
         raise ValueError("记忆读取失败，尚未执行本轮互动。请检查后端连接和运行日志。")
     value = json.loads(body)
-    return {"history": value["history"], "base_sequence": value["base_sequence"],
-            "remembered_turns": value["remembered_turns"]}
+    # Reuse observed actions without inviting the model to copy its old prose.
+    # Full original replies remain in PowerContext and in the HTTP node response.
+    history = [{"sequence": turn["sequence"], "action": turn["action"]}
+               for turn in json.loads(value["history"])]
+    return {"history": json.dumps(history, ensure_ascii=False, indent=2), "base_sequence": value["base_sequence"],
+            "remembered_turns": value["remembered_turns"],
+            "memory_rule": ("首次会面：请先友好欢迎这位新客人，再回应他这次的行动。你们的故事从现在开始。"
+                            if value["remembered_turns"] == 0 else
+                            "这位客人来过。历史只用于记起旧事；必须推进本轮新行动，不能重演旧行动。玩家若道歉或补救，要回应他的补救。")}
 
 
 def encode_commit(player_id: str, turn_id: str, action: str, reply: str, base_sequence: int) -> dict:

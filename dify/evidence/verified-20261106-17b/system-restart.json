@@ -1,0 +1,8 @@
+{
+  "service": "dify-grudge-memory",
+  "before_pid": 50100,
+  "after_pid": 57183,
+  "restarted_at": "2026-11-06T09:51:02.909476+00:00",
+  "data_directory": "~/.local/share/dify-grudge-shop/memory",
+  "player_id": "submit-20261106-a"
+}
