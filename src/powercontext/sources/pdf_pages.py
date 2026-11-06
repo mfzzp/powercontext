@@ -66,10 +66,10 @@ def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
         raise ValueError("Input is not a PDF document")
     digest = hashlib.sha256(value.content).hexdigest()
     try:
-        # Non-strict mode lets pypdf repair the minor cross-reference damage
-        # that real annual reports routinely carry; genuinely broken inputs
-        # still raise below, so the atomic-failure contract is unchanged.
-        reader = PdfReader(io.BytesIO(value.content))
+        # Strict parsing keeps the contract atomic: a PDF whose cross-reference
+        # data needs repair is not completely parseable and must fail instead of
+        # yielding a quietly reconstructed page tree.
+        reader = PdfReader(io.BytesIO(value.content), strict=True)
         if reader.is_encrypted and not reader.decrypt(""):
             raise ValueError("PDF requires a non-empty password")
         # Materialize all pages and all text before exposing any result.
