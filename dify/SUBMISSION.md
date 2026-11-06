@@ -5,7 +5,7 @@
 | 提交项 | 内容 |
 |---|---|
 | 仓库 | https://github.com/mfzzp/powercontext |
-| 分支 | codex/dify |
+| 分支 | 2026-competition-dify |
 | 固定提交 | 使用本分支最终 `git rev-parse HEAD` 的完整输出，填写到测评平台 |
 | DSL | grudge-shop.yml，唯一入口文件，无需依次导入多个应用 |
 | 运行说明 | README.md；完整本地部署见 deploy/README.md |

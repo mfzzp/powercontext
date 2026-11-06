@@ -4,7 +4,7 @@
 
 ## 固定环境
 
-- 分支：`codex/dify`；比赛基线 `d647275c308e09b7b623f322a26f5c4e85734fb0` 是当前分支祖先，Git 检查退出码 0。
+- 分支：`2026-competition-dify`；比赛基线 `d647275c308e09b7b623f322a26f5c4e85734fb0` 是当前分支祖先，Git 检查退出码 0。
 - Ubuntu 24.04 / WSL 2，Docker 29.1.3，Compose 2.40.3，Python 3.12.3。
 - Dify 1.13.0，官方源码 `c730fec1e422e907fed668291b2ea18c4c243644`；官方模型插件 OpenAI-API-compatible 0.0.73。
 - 模型：`Qwen/Qwen3-1.7B-GGUF` Q8_0，版本和官方 SHA256 见 deploy/assets.json；llama.cpp b12144，本机 CPU 推理。
