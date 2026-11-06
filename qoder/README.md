@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-**主要功能已完成并通过全部验收测试。** 代码由 Qoder 在 `codex/qoder` 分支实际开发，真实 PowerContext 保存、重启持久化、幂等提交、参数校验均已验证。展示网站通过 Qoder Sites 发布。
+**主要功能已完成并通过全部验收测试。** 代码由 Qoder 在 `2026-competition-qoder` 分支实际开发，真实 PowerContext 保存、重启持久化、幂等提交、参数校验均已验证。展示网站通过 Qoder Sites 发布。
 
 ## 已完成内容
 
@@ -23,7 +23,7 @@
 # 克隆仓库
 git clone https://github.com/mfzzp/powercontext.git
 cd powercontext
-git checkout codex/qoder
+git checkout 2026-competition-qoder
 cd qoder
 
 # 安装依赖（Python 3.12+）

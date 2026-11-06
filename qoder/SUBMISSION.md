@@ -7,8 +7,8 @@
 | 项目名称 | 复习接力站 |
 | 项目网站 URL（Qoder Sites） | **https://review-station-x1ylc19rxsb.qoder.zone** |
 | 代码仓库 | https://github.com/mfzzp/powercontext |
-| 分支 | codex/qoder |
-| 最终完整 commit SHA | 待功能提交后填写（当前 HEAD: edf0df6） |
+| 分支 | 2026-competition-qoder |
+| 最终完整 commit SHA | 以测评平台填写的最终固定提交为准 |
 | Qoder 账号 UID | **01a1a476-68e7-714c-ab25-bd8c7e40bf6f** |
 | 主要开发会话记录 | Qoder 会话完成全部开发、测试与验收，证据见 `evidence/RUN_LOG.md` |
 | 运行说明 | `RUN.md` 已编写，包含安装、启动、测试、重置完整步骤 |
@@ -40,7 +40,7 @@
 ## 待本人操作
 
 1. **填写 Qoder UID**：登录 Qoder Desktop，在账号信息中查看 UID，填入上表
-2. **提交代码**：将最终代码 push 到 `codex/qoder` 分支后填写 commit SHA
+2. **提交代码**：将最终代码 push 到 `2026-competition-qoder` 分支后填写 commit SHA
 3. **无痕窗口验证**：用无痕窗口打开 https://review-station-x1ylc19rxsb.qoder.zone 确认可访问
 
 ## 已完成操作
