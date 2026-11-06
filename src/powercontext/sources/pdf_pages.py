@@ -376,9 +376,9 @@ def _rank_pages(
         # Positive, bounded priors instead of eliminating every other report
         # after one possibly ambiguous company-name match.
         if doc_matches[index] and matched_documents == 1:
-            score *= 1.6
+            score *= 2.0
         if _report_year_matches(documents[index], question):
-            score *= 1.25
+            score *= 1.35
         rank = search_order.get(record.entry.entry_id)
         if rank is not None:
             score += 0.05 / (1 + rank)
