@@ -258,57 +258,86 @@ def _is_contents_page(body: str) -> bool:
     return sum(1 for line in body[:1500].lower().splitlines() if _TOC_ENTRY.match(line)) >= 8
 
 
-def _projected_metadata(source: object) -> dict[str, Any] | None:
-    """Read the page metadata a captured Source projected for transport."""
+_PAGE_CACHE: dict[tuple[int, str, int | None], dict[str, tuple[str, int, str]]] = {}
+
+
+def _projected_page(source: object) -> tuple[str, int, str] | None:
+    """Read ``(document_id, page_number, page_text)`` from a captured Source."""
 
     projection = getattr(source, "projection", None)
     if projection is None:
         return None
     try:
-        metadata = projection(TEXT_EVIDENCE_PROJECTION_KEY).get("metadata", {})
+        projected = projection(TEXT_EVIDENCE_PROJECTION_KEY)
     except Exception:  # noqa: BLE001 - Sources without this projection are skipped
         return None
-    if not isinstance(metadata.get("document_id"), str) or not isinstance(metadata.get("page_number"), int):
+    metadata = projected.get("metadata", {})
+    document_id = metadata.get("document_id")
+    page_number = metadata.get("page_number")
+    if not isinstance(document_id, str) or not isinstance(page_number, int):
         return None
-    return metadata
+    content = projected.get("content", "")
+    _, separator, body = content.partition("\n")
+    return document_id, page_number, body if separator else ""
 
 
-async def _source_page_metadata(memory: Any) -> dict[str, tuple[str, int]]:
-    """Map each Source id in this Scope to its exact ``(document_id, page_number)``.
+async def _source_pages(
+    memory: Any, memory_ref: object = None
+) -> dict[str, tuple[str, int, str]]:
+    """Map each Source id in this Scope to its exact page identity and full text.
 
-    Memory entries only carry ``SourceRef`` values, so page identity lives in the
-    Scope's Source catalog. Read it through the Runtime that owns this Memory. A
-    Memory facade that cannot reach one yields an empty map, and the caller falls
-    back to reading the identity out of the projection text.
+    Memory entries only carry ``SourceRef`` values, so the page identity and the
+    whole page text live in the Scope's Source catalog. Reading them there keeps
+    ranking independent of how the Memory pipeline splits page text into
+    entries. The result is cached per Memory revision: a new revision can only
+    follow new sources, so one catalog read serves every question in a run. A
+    Memory facade that cannot reach a catalog yields an empty map and the caller
+    falls back to the entry text.
     """
 
     runtime = getattr(memory, "_runtime", None)
     scope_id = getattr(memory, "scope_id", None)
     if runtime is None or scope_id is None:
         return {}
+    key = (id(memory), scope_id, getattr(memory_ref, "revision", None))
+    cached = _PAGE_CACHE.get(key)
+    if cached is not None:
+        return cached
     try:
         async with runtime._context(scope_id) as context:
             catalog = context.sources.catalog
             sources = await catalog.list()
-            pages: dict[str, tuple[str, int]] = {}
+            pages: dict[str, tuple[str, int, str]] = {}
             for source in sources:
-                metadata = _projected_metadata(source)
-                if metadata is not None:
-                    pages[catalog.as_ref(source).source_id] = (
-                        metadata["document_id"],
-                        metadata["page_number"],
-                    )
-            return pages
-    except Exception:  # noqa: BLE001 - metadata is an optimisation, never a failure
+                page = _projected_page(source)
+                if page is not None:
+                    pages[catalog.as_ref(source).source_id] = page
+    except Exception:  # noqa: BLE001 - catalogue access is an optimisation, never a failure
         return {}
+    _PAGE_CACHE.clear()
+    _PAGE_CACHE[key] = pages
+    return pages
 
 
-def _rank_pages(records: list[MemoryEntryRecord], question: str, search_order: dict[str, int]) -> list[int]:
+def _rank_pages(
+    records: list[MemoryEntryRecord],
+    question: str,
+    search_order: dict[str, int],
+    pages: dict[str, tuple[str, int, str]],
+) -> list[int]:
     if not records:
         return []
-    splits = [_split_entry(record.entry.text) for record in records]
-    documents = [document_id for document_id, _ in splits]
-    bodies = [body for _, body in splits]
+    documents: list[str] = []
+    bodies: list[str] = []
+    for record in records:
+        page = pages.get(record.entry.sources[0].source_id)
+        if page is not None:
+            documents.append(page[0])
+            bodies.append(page[2])
+        else:
+            document_id, body = _split_entry(record.entry.text)
+            documents.append(document_id)
+            bodies.append(body)
     token_lists = [_terms(body) for body in bodies]
     counts = [Counter(tokens) for tokens in token_lists]
     frequency: Counter[str] = Counter()
@@ -379,19 +408,20 @@ async def search_pdf_pages(memory: Any, question: str, limit: int = 10) -> tuple
         record for record in page.entries
         if len(record.entry.sources) == 1 and record.entry.sources[0].source_type == "pdf-page"
     ]
-    # Exact page identity comes from the Source catalog; the projection text is
-    # only a fallback for a Memory facade that cannot reach it.
-    pages = await _source_page_metadata(memory)
+    # Exact page identity and full page text come from the Source catalog; the
+    # entry text is only a fallback for a Memory facade that cannot reach it.
+    pages = await _source_pages(memory, getattr(page, "memory_ref", None))
     result: list[MemoryCitation] = []
     seen: set[tuple[object, object]] = set()
-    for index in _rank_pages(records, question, search_order):
+    for index in _rank_pages(records, question, search_order, pages):
         record = records[index]
         source_id = record.entry.sources[0].source_id
-        document_id, body = _split_entry(record.entry.text)
-        page_key: tuple[object, object] = pages.get(source_id) or (
-            document_id,
-            " ".join(body.split()).casefold(),
-        )
+        known = pages.get(source_id)
+        if known is not None:
+            page_key: tuple[object, object] = (known[0], known[1])
+        else:
+            document_id, body = _split_entry(record.entry.text)
+            page_key = (document_id, " ".join(body.split()).casefold())
         if page_key in seen:
             continue
         # Resolve the exact version through the same scoped public API before
