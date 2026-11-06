@@ -31,8 +31,8 @@ tar -xzf "$SHOP_HOME/assets/llama-b12144-bin-ubuntu-x64.tar.gz" -C "$SHOP_HOME/l
 "$SHOP_HOME/venv/bin/python" deploy/prepare_compose.py
 sudo python3 deploy/install_services.py "$(id -un)" "$SHOP_HOME/venv/bin/python"
 (cd "$SHOP_HOME/dify-upstream/docker" && sudo docker compose up -d && sudo docker compose restart nginx)
-# 首次启动需要等待 API 数据库迁移完成；访问下面的 URL 可检查状态。
-curl http://127.0.0.1:18080/console/api/setup
+# 等待数据库迁移、模型加载和记忆 HTTP 服务完成；未就绪将非零退出。
+python3 deploy/check_ready.py
 "$SHOP_HOME/venv/bin/python" build_dsl.py
 "$SHOP_HOME/venv/bin/python" deploy/configure_dify.py
 ```
@@ -70,6 +70,8 @@ sudo systemctl restart dify-grudge-memory
 ## 重新启动与排错
 
 Linux：`sudo systemctl start docker dify-grudge-model dify-grudge-memory`，再进入部署目录运行 `sudo docker compose up -d`。Windows 可运行本目录 `Start-Dify.ps1`；默认发行版 Ubuntu-24.04、Linux 用户 minimax，可通过参数修改。
+
+启动脚本现在会等待 Dify API、模型和记忆服务均能返回 HTTP 200，再显示入口。该检查不替代真实工作流验证。WSL 休眠或 Windows 重启后应重新执行启动脚本；不能以 Docker 容器列表显示 Up 判断完整应用已经就绪。脚本通过隐藏的 WSL 会话保持本机服务运行，关闭该会话或执行 `wsl --shutdown` 会停止本地服务。
 
 查看本机服务：`sudo journalctl -u dify-grudge-model -u dify-grudge-memory -n 40`。查看 Dify：在部署目录执行 `sudo docker compose ps`、`sudo docker compose logs --tail 60 api plugin_daemon sandbox`。插件首次安装需下载 Python 依赖。镜像或模型下载中断后重试会利用已有缓存；镜像下载受限时，需为 Docker daemon 配置当前机器确实可用的代理，不能把容器内 localhost 当作 Windows 代理地址。
 
