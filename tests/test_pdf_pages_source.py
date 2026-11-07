@@ -188,6 +188,23 @@ class PDFSearchTests(unittest.IsolatedAsyncioTestCase):
         ])
         self.assertEqual(await search_pdf_pages(memory, "Acme capital expenditures in 2022", 1), (records[1].citation,))
 
+    async def test_company_match_counts_distinct_reports_instead_of_pages(self):
+        memory, records = self.memory([
+            "OTHER_2022_10K\nConsolidated statements of income. Net income 120.",
+            "ACME_2022_10K\nConsolidated statements of income. Net income 120.",
+            "ACME_2022_10K\nBalance sheet. Assets 500 and liabilities 200.",
+        ])
+        self.assertEqual(await search_pdf_pages(memory, "What was Acme net income in 2022?", 1),
+                         (records[1].citation,))
+
+    async def test_identical_text_on_distinct_physical_pages_is_not_merged(self):
+        memory, records = self.memory([
+            "ACME_2022_10K\nThis page intentionally left blank.",
+            "ACME_2022_10K\nThis page intentionally left blank.",
+        ], source_ids=["physical-page-1", "physical-page-2"])
+        self.assertEqual(await search_pdf_pages(memory, "Acme report pages", 20),
+                         (records[0].citation, records[1].citation))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

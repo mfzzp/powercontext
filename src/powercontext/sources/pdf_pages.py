@@ -133,6 +133,7 @@ PDF_PAGE_SOURCE_DEFINITION: SourceDefinition[PDFPageInput, PDFPageSource, PDFPag
 
 _TOKEN = re.compile(r"[a-z]+|\d+")
 _TOC_ENTRY = re.compile(r"\s*(?:item\s+\d|part\s+[ivx])")
+_RUNNING_HEAD = re.compile(r"^\s*(?:table\s+of\s+contents)\s*$", re.IGNORECASE)
 _STOP_WORDS = frozenset("""
 a an and are as at be been being by can could did do does for from had has have how
 i if in into is it its may of on or that the their them there these they this those
@@ -141,6 +142,7 @@ about after before during each any all such using use used only shown within det
 answer respond response give assuming perspective investment analyst question please
 fy fiscal year years reported report annual directly outlined explicitly state calculate
 define relying following according based information important primarily quantity
+company useful metric
 """.split())
 
 # General financial vocabulary, independent of documents, questions and annotations.
@@ -162,6 +164,18 @@ _FINANCIAL_CONCEPTS = (
     ("inventory inventories", "inventory inventories"),
     ("receivable receivables", "receivable account allowance"),
     ("pension retirement", "pension retirement benefit obligation"),
+)
+
+# Questions that ask for a number are answered on table-heavy pages.
+_NUMERIC_INTENT = frozenset(
+    "amount quantity percentage rate margin cost revenue income profit price total "
+    "value number ebitda capex expense debt cash asset liability".split()
+)
+
+# Question intents that the primary statements answer directly.
+_METRIC_TERMS = frozenset(
+    "income earning profit ebitda margin sale revenue capex expenditure depreciation "
+    "amortization cash flow asset liability debt equity".split()
 )
 
 
@@ -190,7 +204,7 @@ def _query_weights(question: str) -> dict[str, float]:
     for triggers, expansion in _FINANCIAL_CONCEPTS:
         if terms.intersection(_terms(triggers)):
             for term in _terms(expansion):
-                weights.setdefault(term, 0.3)
+                weights.setdefault(term, 1.0)
     return weights
 
 
@@ -207,6 +221,30 @@ def _document_matches(document_id: str, question: str) -> bool:
         return False
     pattern = r"(?<![a-z0-9])" + r"[\W_]*".join(map(re.escape, parts)) + r"(?![a-z0-9])"
     return re.search(pattern, question, flags=re.IGNORECASE) is not None
+
+
+_ALIAS_TOKEN = re.compile(r"\b[A-Z]{3,6}\b")
+
+
+def _alias_matches(document_id: str, question: str) -> bool:
+    """Recognise an abbreviation that is a subsequence of a document name.
+
+    ``AMEX`` is a subsequence of ``AMERICANEXPRESS`` and ``JPM`` of ``JPMORGAN``,
+    so a short upper-case token can identify the report without any alias table.
+    """
+
+    words = [word for word in re.findall(r"[a-z]+", document_id.lower()) if len(word) >= 6]
+    if not words:
+        return False
+    for token in _ALIAS_TOKEN.findall(question):
+        low = token.lower()
+        if low in words:
+            continue
+        for word in words:
+            letters = iter(word)
+            if all(letter in letters for letter in low):
+                return True
+    return False
 
 
 def _report_year_matches(document_id: str, question: str) -> bool:
@@ -256,6 +294,31 @@ def _split_entry(text: str) -> tuple[str, str]:
 def _is_contents_page(body: str) -> bool:
     """Identify a literal table-of-contents page rather than any page with that header."""
     return sum(1 for line in body[:1500].lower().splitlines() if _TOC_ENTRY.match(line)) >= 8
+
+
+def _opening(body: str) -> str:
+    """Drop the repeated running header so a page's own heading and lead text remain."""
+
+    lines = body.lstrip().splitlines()
+    while lines and (not lines[0].strip() or _RUNNING_HEAD.match(lines[0])):
+        lines.pop(0)
+    return "\n".join(lines).lstrip()
+
+
+def _statement_weight(title: set[str], query: set[str]) -> float:
+    """Primary statements answer most numeric questions, so lift them multiplicatively."""
+
+    financial_page = (
+        "statement" in title
+        or {"balance", "sheet"}.issubset(title)
+        or ("cash" in title and "flow" in title)
+        or ("operation" in title and "consolidated" in title)
+    )
+    if not financial_page:
+        return 1.0
+    if not query.intersection(_METRIC_TERMS):
+        return 1.0
+    return 1.9
 
 
 _PAGE_CACHE: dict[tuple[int, str, int | None], dict[str, tuple[str, int, str]]] = {}
@@ -338,6 +401,8 @@ def _rank_pages(
             document_id, body = _split_entry(record.entry.text)
             documents.append(document_id)
             bodies.append(body)
+    openings = [_opening(body) for body in bodies]
+    titles = [set(_terms(opening[:450])) for opening in openings]
     token_lists = [_terms(body) for body in bodies]
     counts = [Counter(tokens) for tokens in token_lists]
     frequency: Counter[str] = Counter()
@@ -346,14 +411,16 @@ def _rank_pages(
     average = sum(map(len, token_lists)) / len(records) or 1.0
     weights = _query_weights(question)
     query_terms = set(_terms(question))
-    doc_matches = [_document_matches(document_id, question) for document_id in documents]
-    # Only an unambiguous mention should steer the ranking toward one report.
-    matched_documents = sum(doc_matches)
+    matched_documents = {
+        document_id for document_id in set(documents)
+        if _document_matches(document_id, question) or _alias_matches(document_id, question)
+    }
     idfs = {term: math.log(1.0 + (len(records) - frequency[term] + 0.5) / (frequency[term] + 0.5))
             for term in weights}
     query_sequence = _terms(question)
     query_pairs = set(zip(query_sequence, query_sequence[1:], strict=False))
-    scored = []
+
+    base: list[float] = []
     for index, (record, tokens, count) in enumerate(zip(records, token_lists, counts, strict=True)):
         score = 0.0
         normalization = 1.2 * (0.25 + 0.75 * len(tokens) / average)
@@ -361,25 +428,48 @@ def _rank_pages(
             tf = count[term]
             if tf:
                 score += weight * idfs[term] * tf * 2.2 / (tf + normalization)
-        # Evidence density and literal phrases complement whole-page BM25,
-        # especially when repeated generic financial words dominate long pages.
-        windows = (set(tokens[start:start + 120]) for start in range(0, len(tokens), 60))
-        proximity = max((sum(weights[term] * idfs[term] for term in window.intersection(weights))
-                         for window in windows), default=0.0)
+        # Passage-level scoring: a page is evidence when one dense window answers
+        # the question, not because it repeats the words across the whole page.
+        best_window = 0.0
+        for start in range(0, max(1, len(tokens)), 60):
+            window = Counter(tokens[start:start + 120])
+            window_score = 0.0
+            for term, weight in weights.items():
+                tf = window.get(term, 0)
+                if tf:
+                    window_score += weight * idfs[term] * tf * 2.2 / (tf + 1.2)
+            if window_score > best_window:
+                best_window = window_score
         pairs = query_pairs.intersection(zip(tokens, tokens[1:], strict=False))
-        score += 0.3 * proximity + 0.3 * sum(min(idfs.get(a, 0), idfs.get(b, 0)) for a, b in pairs)
-        title = set(_terms(bodies[index][:450]))
-        score += 0.15 * sum(weight for term, weight in weights.items() if term in title and not term.isdigit())
+        score += 1.0 * best_window + 0.3 * sum(min(idfs.get(a, 0), idfs.get(b, 0)) for a, b in pairs)
+        # A page whose own heading names the question's topic is almost always
+        # the evidence page, so this is applied multiplicatively: additive
+        # bonuses are noise next to the magnitude of a BM25 score.
+        lead = set(_terms(openings[index][:160]))
+        lead_hits = [term for term, weight in weights.items()
+                     if term in lead and not term.isdigit() and weight >= 1.0]
+        score *= 1.0 + 0.55 * min(3, len(lead_hits))
+        # A statement or table page is mostly numbers, while a narrative page
+        # is not; silence here let prose pages outrank the actual tables. Only
+        # questions that ask for a figure get this signal.
+        if query_terms.intersection(_NUMERIC_INTENT):
+            numeric_ratio = sum(1 for token in tokens if token.isdigit()) / max(1, len(tokens))
+            score *= 1.0 + 1.4 * min(numeric_ratio, 0.35) / 0.35
+        base.append(score)
+
+    scored = []
+    for index, score in enumerate(base):
+        title = titles[index]
+        score *= _statement_weight(title, query_terms)
         score += _heading_bonus(title, query_terms)
         if _is_contents_page(bodies[index]):
             score *= 0.75
-        # Positive, bounded priors instead of eliminating every other report
-        # after one possibly ambiguous company-name match.
-        if doc_matches[index] and matched_documents == 1:
-            score *= 2.0
+        # Only an unambiguous mention steers the ranking toward one report.
+        if len(matched_documents) == 1 and documents[index] in matched_documents:
+            score *= 3.0
         if _report_year_matches(documents[index], question):
             score *= 1.35
-        rank = search_order.get(record.entry.entry_id)
+        rank = search_order.get(records[index].entry.entry_id)
         if rank is not None:
             score += 0.05 / (1 + rank)
         scored.append((score, index))
@@ -412,16 +502,14 @@ async def search_pdf_pages(memory: Any, question: str, limit: int = 10) -> tuple
     # entry text is only a fallback for a Memory facade that cannot reach it.
     pages = await _source_pages(memory, getattr(page, "memory_ref", None))
     result: list[MemoryCitation] = []
-    seen: set[tuple[object, object]] = set()
+    seen: set[object] = set()
     for index in _rank_pages(records, question, search_order, pages):
         record = records[index]
         source_id = record.entry.sources[0].source_id
         known = pages.get(source_id)
-        if known is not None:
-            page_key: tuple[object, object] = (known[0], known[1])
-        else:
-            document_id, body = _split_entry(record.entry.text)
-            page_key = (document_id, " ".join(body.split()).casefold())
+        # A Source id identifies a page even when the catalog is unavailable;
+        # identical text can legitimately occur on multiple physical pages.
+        page_key = (known[0], known[1]) if known is not None else source_id
         if page_key in seen:
             continue
         # Resolve the exact version through the same scoped public API before
