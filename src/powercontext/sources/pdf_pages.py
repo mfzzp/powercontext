@@ -411,10 +411,13 @@ def _rank_pages(
     average = sum(map(len, token_lists)) / len(records) or 1.0
     weights = _query_weights(question)
     query_terms = set(_terms(question))
-    matched_documents = {
-        document_id for document_id in set(documents)
-        if _document_matches(document_id, question) or _alias_matches(document_id, question)
-    }
+    report_ids = set(documents)
+    exact_matches = {document_id for document_id in report_ids if _document_matches(document_id, question)}
+    preferred_report = next(iter(exact_matches)) if len(exact_matches) == 1 else None
+    alias_matches = (
+        {document_id for document_id in report_ids if _alias_matches(document_id, question)}
+        if not exact_matches else set()
+    )
     idfs = {term: math.log(1.0 + (len(records) - frequency[term] + 0.5) / (frequency[term] + 0.5))
             for term in weights}
     query_sequence = _terms(question)
@@ -464,17 +467,20 @@ def _rank_pages(
         score += _heading_bonus(title, query_terms)
         if _is_contents_page(bodies[index]):
             score *= 0.75
-        # Only an unambiguous mention steers the ranking toward one report.
-        if len(matched_documents) == 1 and documents[index] in matched_documents:
+        # Subsequence abbreviations are weaker than complete company names.
+        if len(alias_matches) == 1 and documents[index] in alias_matches:
             score *= 3.0
         if _report_year_matches(documents[index], question):
             score *= 1.35
         rank = search_order.get(records[index].entry.entry_id)
         if rank is not None:
             score += 0.05 / (1 + rank)
-        scored.append((score, index))
-    scored.sort(key=lambda item: (-item[0], item[1]))
-    return [index for _, index in scored]
+        # Reserve the front of the result for a uniquely named report while
+        # keeping other reports available when it has fewer matching pages.
+        routed = documents[index] == preferred_report and score > 0.0
+        scored.append((routed, score, index))
+    scored.sort(key=lambda item: (not item[0], -item[1], item[2]))
+    return [index for _, _, index in scored]
 
 
 async def search_pdf_pages(memory: Any, question: str, limit: int = 10) -> tuple[MemoryCitation, ...]:

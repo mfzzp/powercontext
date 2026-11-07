@@ -205,6 +205,16 @@ class PDFSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await search_pdf_pages(memory, "Acme report pages", 20),
                          (records[0].citation, records[1].citation))
 
+    async def test_exact_report_match_takes_precedence_over_alias_and_page_score(self):
+        memory, records = self.memory([
+            "ACMESUPPLIES_2022_10K\nConsolidated statements of income. Net revenue and operating income.",
+            "ACME_2022_10K\nRevenue 120.",
+        ])
+        self.assertEqual(
+            await search_pdf_pages(memory, "What was ACME net revenue and operating income in 2022?", 2),
+            (records[1].citation, records[0].citation),
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
