@@ -236,6 +236,23 @@ def _document_matches(document_id: str, question: str) -> bool:
 
 
 _ALIAS_TOKEN = re.compile(r"\b[A-Z]{3,6}\b")
+_TICKER_TOKEN = re.compile(r"\b[A-Z][A-Z0-9]{1,5}\b")
+_TICKER_DECLARATION = re.compile(
+    r"\b(?i:trad(?:e|es|ed|ing)\s+under\s+(?:the\s+)?(?:ticker\s+)?symbol"
+    r"|(?:trading|ticker)\s+symbol(?:s|\(s\))?[ \t]*:)\s*[\"'“‘]?([A-Z][A-Z0-9]{1,5})\b"
+)
+
+
+def _ticker_report(documents: list[str], bodies: list[str], question: str) -> str | None:
+    """Route on a symbol disclosed in the supplied reports, when unambiguous."""
+    symbols = set(_TICKER_TOKEN.findall(question))
+    if not symbols:
+        return None
+    matches = {
+        document_id for document_id, body in zip(documents, bodies, strict=True)
+        if document_id and symbols.intersection(_TICKER_DECLARATION.findall(body))
+    }
+    return next(iter(matches)) if len(matches) == 1 else None
 
 
 def _alias_matches(document_id: str, question: str) -> bool:
@@ -333,6 +350,53 @@ def _statement_weight(title: set[str], query: set[str]) -> float:
     return 1.9
 
 
+_ROW_VALUE = r"(?:\(?[+−-]?(?:[$€£]\s*)?\d[\d,]*(?:\.\d+)?%?\)?|[—–-])"
+_NUMERIC_ROW = re.compile(rf"^\s*([A-Za-z].{{0,95}}?)\s+{_ROW_VALUE}(?:\s+{_ROW_VALUE})*\s*$")
+_MARGIN_NUMERATORS = {
+    "operation": {"operation income", "operation profit", "operation earning", "income operation"},
+    "gross": {"gross profit", "gross income", "gross earning"},
+    "net": {"net income", "net profit", "net earning"},
+}
+_REVENUE_LABELS = {"revenue", "net revenue", "sale", "net sale"}
+
+
+def _margin_table_strength(body: str, kinds: set[str]) -> int:
+    """Recognize numeric margin rows, or the numerator and revenue rows together."""
+    labels = set()
+    for line in body.splitlines():
+        row = _NUMERIC_ROW.fullmatch(line)
+        if row is not None and any(character.isdigit() for character in line[row.end(1):]):
+            labels.add(" ".join(_terms(row[1])).removeprefix("total "))
+    if any(f"{kind} margin" in labels or f"{kind} profit margin" in labels for kind in kinds):
+        return 2
+    if labels.intersection(_REVENUE_LABELS) and any(labels.intersection(_MARGIN_NUMERATORS[k]) for k in kinds):
+        return 1
+    return 0
+
+
+def _fuse_margin_tables(
+    scored: list[tuple[bool, float, int]], bodies: list[str], kinds: set[str],
+) -> list[tuple[bool, float, int]]:
+    # Rank actual numeric rows separately from prose so a short statement can
+    # surface even when many discussion pages repeat the question's wording.
+    tables = []
+    for lexical_rank, (_, _, index) in enumerate(scored, 1):
+        if not _is_contents_page(bodies[index]):
+            strength = _margin_table_strength(bodies[index], kinds)
+            if strength:
+                tables.append((-strength, lexical_rank, index))
+    if not tables:
+        return scored
+    table_ranks = {index: rank for rank, (_, _, index) in enumerate(sorted(tables), 1)}
+    fused = []
+    for lexical_rank, (routed, _, index) in enumerate(scored, 1):
+        score = 1.0 / (20 + lexical_rank)
+        if index in table_ranks:
+            score += 0.6 / (20 + table_ranks[index])
+        fused.append((routed, score, index))
+    return sorted(fused, key=lambda item: (not item[0], -item[1], item[2]))
+
+
 _PAGE_CACHE: dict[tuple[int, str, int | None], dict[str, tuple[str, int, str]]] = {}
 
 
@@ -426,9 +490,11 @@ def _rank_pages(
     report_ids = set(documents)
     exact_matches = {document_id for document_id in report_ids if _document_matches(document_id, question)}
     preferred_report = next(iter(exact_matches)) if len(exact_matches) == 1 else None
+    if not exact_matches:
+        preferred_report = _ticker_report(documents, bodies, question)
     alias_matches = (
         {document_id for document_id in report_ids if _alias_matches(document_id, question)}
-        if not exact_matches else set()
+        if not exact_matches and preferred_report is None else set()
     )
     idfs = {term: math.log(1.0 + (len(records) - frequency[term] + 0.5) / (frequency[term] + 0.5))
             for term in weights}
@@ -492,6 +558,9 @@ def _rank_pages(
         routed = documents[index] == preferred_report and score > 0.0
         scored.append((routed, score, index))
     scored.sort(key=lambda item: (not item[0], -item[1], item[2]))
+    margin_kinds = query_terms.intersection(_MARGIN_NUMERATORS)
+    if "margin" in query_terms and margin_kinds:
+        scored = _fuse_margin_tables(scored, bodies, margin_kinds)
     return [index for _, _, index in scored]
 
 

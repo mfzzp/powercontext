@@ -225,6 +225,32 @@ class PDFSearchTests(unittest.IsolatedAsyncioTestCase):
             (records[1].citation, records[0].citation),
         )
 
+    async def test_disclosed_ticker_routes_evidence_to_its_report(self):
+        memory, records = self.memory([
+            *[
+                f"OTHER_2022_10K\nConsolidated statements of income\nNet income {100 + i} 110\nProfit 50 40"
+                for i in range(24)
+            ],
+            'NORTHWIND_2022_10K\nNorthwind common stock trades under the symbol "ZQR".',
+            "NORTHWIND_2022_10K\nProfit 100",
+        ])
+        result = await search_pdf_pages(memory, "What was ZQR net income in 2022?", limit=20)
+        self.assertIn(records[-1].citation, result)
+
+    async def test_operating_margin_finds_numeric_operands_among_narrative_pages(self):
+        memory, records = self.memory([
+            *[
+                f"ACME_2022_10K\nOperating margin discussion {i}\n"
+                "Operating margin improved as operating income, net revenue and sales increased. "
+                "The change in operating margin reflects operating results and costs."
+                for i in range(24)
+            ],
+            "ACME_2022_10K\nFinancial results\nNet sales 1,200 1,100\nOperating profit 120 99",
+            "OTHER_2022_10K\nFinancial results\nNet sales 2,400 2,200\nOperating profit 240 198",
+        ])
+        result = await search_pdf_pages(memory, "How did Acme's operating margin change in 2022?", limit=20)
+        self.assertIn(records[-2].citation, result)
+
 
 @pytest.mark.asyncio
 async def test_search_distinguishes_pdf_revisions_after_restart(tmp_path):
