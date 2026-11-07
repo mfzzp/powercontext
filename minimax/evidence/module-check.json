@@ -1,0 +1,23 @@
+{
+  "command": [
+    "python",
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "cwd": "minimax",
+  "integration": true,
+  "exit_code": 0,
+  "stdout": ".............                                                            [100%]\n13 passed in 4.20s\n",
+  "stderr": "",
+  "code_versions_sha256": {
+    "sdd_context/__init__.py": "0aca38f66399a4bcd9cb1c9181487fd05b91743efa7cb17dd360fef0321ff657",
+    "sdd_context/__main__.py": "c1c96c2c4260f9f2b7b78cbb0d71d9d0514b27429b007b09f41c0b15f1062dd8",
+    "sdd_context/config.py": "7e24fe25453e937cd17d909348dce2f993581d0a1c3f00507f6d4a721f7491b0",
+    "sdd_context/model.py": "70e2701b42724e67ac807fa11cd842b40a042f416474105b0d9bc647c36750e8",
+    "sdd_context/state.py": "85879d1212a1a6ac829a10a6313a95879fdf1414d0b350c8969243005109ad55",
+    "sdd_context/store.py": "075e48118347dc1611cd761184eadf8840351428ee2106c9ab2fef6af32c5564",
+    "sdd_context/workflow.py": "716c09ad0192a42349bc7d7113a8480fcd74c589e117d09aa5300a47d5c04194",
+    "tests/test_module.py": "7f143a3de0db7cd3455885fe6e4e0ca554842085494a0889c58a540a0ffa9afc"
+  }
+}

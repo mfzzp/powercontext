@@ -1,0 +1,7 @@
+[
+  {"path": "specs/status.md", "kind": "spec"},
+  {"path": "ticket_app.py", "kind": "code"},
+  {"path": "tests/test_status.py", "kind": "test"},
+  {"path": "tests/test_regression.py", "kind": "test"},
+  {"path": "specs/billing.md", "kind": "spec"}
+]

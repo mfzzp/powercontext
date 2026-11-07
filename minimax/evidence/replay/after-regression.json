@@ -1,0 +1,25 @@
+{
+  "command": [
+    "python",
+    "-I",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "tests",
+    "-t",
+    ".",
+    "-p",
+    "test_regression.py",
+    "-v"
+  ],
+  "cwd": "project",
+  "exit_code": 0,
+  "source_sha256": "f455460b4846bd29d778a6ed1d4222ca612be52a5a3eb884e71d2a82f4a4eedc",
+  "test_sha256": {
+    "test_regression.py": "3bad2cc80bdcf2b1bb0ee5480e54a4ec9159898d523c2da8e137ea8a4853c609",
+    "test_status.py": "17871850f439ebb250c377dae97f89d84ade9e3ebea1b09fddef525e00801e0a"
+  },
+  "stdout": "",
+  "stderr": "test_empty_input (tests.test_regression.RegressionTests.test_empty_input) ... ok\ntest_invalid_limit (tests.test_regression.RegressionTests.test_invalid_limit) ... ok\ntest_limit_without_filter (tests.test_regression.RegressionTests.test_limit_without_filter) ... ok\ntest_limit_zero (tests.test_regression.RegressionTests.test_limit_zero) ... ok\ntest_no_filter_order (tests.test_regression.RegressionTests.test_no_filter_order) ... ok\ntest_no_mutation (tests.test_regression.RegressionTests.test_no_mutation) ... ok\n\n----------------------------------------------------------------------\nRan 6 tests in 0.001s\n\nOK\n"
+}

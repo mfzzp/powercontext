@@ -1,0 +1,124 @@
+{
+  "task": {
+    "task_id": "ticket-status-filter",
+    "description": "Implement ticket status filtering in ticket_app.py according to the latest S1-S4 specification, preserving R1-R5 compatibility. Only change ticket_app.py; do not change tests.",
+    "query": "ticket status filter",
+    "required_sources": [
+      "specs/status.md",
+      "ticket_app.py",
+      "tests/test_status.py",
+      "tests/test_regression.py"
+    ]
+  },
+  "sources": [
+    {
+      "path": "specs/status.md",
+      "kind": "spec",
+      "content": "# Ticket status filter specification version 2\n\nS1: Add status filtering to filter_tickets in ticket_app.py. A non-None status selects matching tickets.\nS2: Superseding version 1: normalize BOTH the supplied status and each ticket's stored status with strip().casefold() before comparing. Unknown or blank status returns an empty list.\nS3: Apply status filtering before limit; retain input order.\nS4: Input tickets always have a string status. No enumeration or ticket ID may be hardcoded.\nR1: status=None keeps all tickets and returns a new list in input order.\nR2: limit=None is unlimited; limit=0 returns an empty list.\nR3: Invalid limits (negative, boolean, non-integer) raise ValueError even with no matching tickets.\nR4: Do not mutate the input list or its dictionaries.\nR5: Preserve the existing function name, keyword-only signature and behavior outside this feature.\nValidation: tests/test_status.py covers the target feature; tests/test_regression.py protects compatibility.\n",
+      "sha256": "837e5a1337524c62bb5483fe1d6cf439304170a2735385e274af864180169139",
+      "revision": 2,
+      "relevance": 3,
+      "lines": [
+        1,
+        12
+      ]
+    },
+    {
+      "path": "tests/test_regression.py",
+      "kind": "test",
+      "content": "\"\"\"Ticket listing compatibility tests R1-R5, also relevant to the status filter change.\"\"\"\nimport copy\nimport unittest\n\nfrom ticket_app import filter_tickets\n\n\nclass RegressionTests(unittest.TestCase):\n    def setUp(self):\n        self.data = [{\"id\": 12, \"status\": \"open\"}, {\"id\": 7, \"status\": \"closed\"}]\n\n    def test_no_filter_order(self):\n        result = filter_tickets(self.data)\n        self.assertEqual(self.data, result)\n        self.assertIsNot(self.data, result)\n\n    def test_limit_without_filter(self):\n        self.assertEqual(self.data[:1], filter_tickets(self.data, limit=1))\n\n    def test_limit_zero(self):\n        self.assertEqual([], filter_tickets(self.data, limit=0))\n\n    def test_empty_input(self):\n        self.assertEqual([], filter_tickets([], status=\"open\"))\n\n    def test_invalid_limit(self):\n        for limit in [-1, 1.5, \"1\", True]:\n            with self.subTest(limit=limit), self.assertRaises(ValueError):\n                filter_tickets(self.data, limit=limit)\n\n    def test_no_mutation(self):\n        saved = copy.deepcopy(self.data)\n        filter_tickets(self.data, status=\"open\", limit=1)\n        self.assertEqual(saved, self.data)\n",
+      "sha256": "3bad2cc80bdcf2b1bb0ee5480e54a4ec9159898d523c2da8e137ea8a4853c609",
+      "revision": 1,
+      "relevance": 3,
+      "lines": [
+        1,
+        34
+      ]
+    },
+    {
+      "path": "tests/test_status.py",
+      "kind": "test",
+      "content": "\"\"\"Target tests for ticket status filter specification S1-S4; fixed before model call.\"\"\"\nimport unittest\n\nfrom ticket_app import filter_tickets\n\n\nclass StatusTests(unittest.TestCase):\n    def setUp(self):\n        self.tickets = [\n            {\"id\": 17, \"status\": \"closed\", \"title\": \"Archived\"},\n            {\"id\": 4, \"status\": \"open\", \"title\": \"New\"},\n            {\"id\": 91, \"status\": \"open\", \"title\": \"Waiting\"},\n        ]\n\n    def test_exact_status(self):\n        self.assertEqual([4, 91], [t[\"id\"] for t in filter_tickets(self.tickets, status=\"open\")])\n\n    def test_case_insensitive(self):\n        self.assertEqual([17], [t[\"id\"] for t in filter_tickets(self.tickets, status=\"CLOSED\")])\n\n    def test_trim_status(self):\n        self.assertEqual([4, 91], [t[\"id\"] for t in filter_tickets(self.tickets, status=\" open \")])\n\n    def test_filter_before_limit(self):\n        self.assertEqual([4], [t[\"id\"] for t in filter_tickets(self.tickets, status=\"open\", limit=1)])\n\n    def test_unknown_status(self):\n        self.assertEqual([], filter_tickets(self.tickets, status=\"waiting-for-review\"))\n\n    def test_blank_status(self):\n        self.assertEqual([], filter_tickets(self.tickets, status=\"  \"))\n\n    def test_normalize_stored_status(self):\n        data = [{\"id\": 56, \"status\": \" Open \"}, {\"id\": 29, \"status\": \"closed\"}]\n        self.assertEqual([data[0]], filter_tickets(data, status=\"open\"))\n",
+      "sha256": "17871850f439ebb250c377dae97f89d84ade9e3ebea1b09fddef525e00801e0a",
+      "revision": 1,
+      "relevance": 3,
+      "lines": [
+        1,
+        35
+      ]
+    },
+    {
+      "path": "ticket_app.py",
+      "kind": "code",
+      "content": "\"\"\"Small ticket listing service. Status filtering is the requested missing feature.\"\"\"\n\n\ndef filter_tickets(tickets, *, status=None, limit=None):\n    \"\"\"Return tickets in input order, optionally limited. Never mutate input.\"\"\"\n    if limit is not None and (type(limit) is not int or limit < 0):\n        raise ValueError(\"limit must be a non-negative integer or None\")\n    result = list(tickets)\n    return result if limit is None else result[:limit]\n",
+      "sha256": "5b41308ac698bf55a1d238d259745be5da6d2d766764b8c92f4f7a8b5c83d732",
+      "revision": 1,
+      "relevance": 3,
+      "lines": [
+        1,
+        9
+      ]
+    }
+  ],
+  "progress": null,
+  "next_action": "implement",
+  "state_reused": false,
+  "source_versions_changed": false,
+  "process_id": 10652,
+  "query_record": {
+    "sql": "SELECT path,kind,content,sha256,revision,(CASE WHEN LOWER(content) LIKE %s THEN 1 ELSE 0 END + CASE WHEN LOWER(content) LIKE %s THEN 1 ELSE 0 END + CASE WHEN LOWER(content) LIKE %s THEN 1 ELSE 0 END) AS relevance FROM sdd_documents WHERE project_id=%s HAVING relevance>0 ORDER BY relevance DESC,path LIMIT %s",
+    "parameters": [
+      "%ticket%",
+      "%status%",
+      "%filter%",
+      "delivery-replay",
+      12
+    ],
+    "results": [
+      {
+        "path": "specs/status.md",
+        "kind": "spec",
+        "sha256": "837e5a1337524c62bb5483fe1d6cf439304170a2735385e274af864180169139",
+        "revision": 2,
+        "relevance": 3,
+        "lines": [
+          1,
+          12
+        ]
+      },
+      {
+        "path": "tests/test_regression.py",
+        "kind": "test",
+        "sha256": "3bad2cc80bdcf2b1bb0ee5480e54a4ec9159898d523c2da8e137ea8a4853c609",
+        "revision": 1,
+        "relevance": 3,
+        "lines": [
+          1,
+          34
+        ]
+      },
+      {
+        "path": "tests/test_status.py",
+        "kind": "test",
+        "sha256": "17871850f439ebb250c377dae97f89d84ade9e3ebea1b09fddef525e00801e0a",
+        "revision": 1,
+        "relevance": 3,
+        "lines": [
+          1,
+          35
+        ]
+      },
+      {
+        "path": "ticket_app.py",
+        "kind": "code",
+        "sha256": "5b41308ac698bf55a1d238d259745be5da6d2d766764b8c92f4f7a8b5c83d732",
+        "revision": 1,
+        "relevance": 3,
+        "lines": [
+          1,
+          9
+        ]
+      }
+    ]
+  }
+}

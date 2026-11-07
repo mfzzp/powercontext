@@ -1,0 +1,10 @@
+services:
+  seekdb:
+    image: oceanbase/seekdb:latest
+    ports:
+      - "127.0.0.1:2970:2881"
+    environment:
+      MEMORY_LIMIT: 2G
+      LOG_DISK_SIZE: 2G
+    # Deliberately ephemeral: every acceptance run may start with an empty database.
+    # Use a named volume for longer-lived deployments; this sample needs no existing data.

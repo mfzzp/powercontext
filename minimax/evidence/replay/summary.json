@@ -1,0 +1,24 @@
+{
+  "run_id": "delivery-replay",
+  "started_at_utc": "2026-11-07T19:20:11.079065+00:00",
+  "model_invoked": false,
+  "parent_pid": 10652,
+  "resume_pid": 17452,
+  "final_resume_pid": 20924,
+  "database_version": "5.7.25-OceanBase seekdb-v1.4.0.0",
+  "dependencies": {
+    "powercontext": "1.5.0",
+    "PyMySQL": "1.2.0",
+    "httpx": "0.28.1",
+    "pytest": "8.3.5"
+  },
+  "python": "3.12.14 (main, Sep  1 2026, 14:17:39) [MSC v.1944 64 bit (AMD64)]",
+  "target_before_exit": 1,
+  "regression_before_exit": 0,
+  "target_after_exit": 0,
+  "regression_after_exit": 0,
+  "tests_unchanged": true,
+  "spec_revision": 2,
+  "powercontext_final_revision": 2,
+  "code_sha256": "f455460b4846bd29d778a6ed1d4222ca612be52a5a3eb884e71d2a82f4a4eedc"
+}

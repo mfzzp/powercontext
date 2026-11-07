@@ -1,0 +1,28 @@
+{
+  "command": [
+    "python",
+    "-m",
+    "sdd_context",
+    "demo",
+    "--run",
+    "delivery-replay",
+    "--replay",
+    "evidence/live/minimax-response.json"
+  ],
+  "exit_code": 0,
+  "stdout": "Before: target behavior fails; regression passes\nseekdb context updated; PowerContext state reused in a new process\n{\"result\": \"passed\", \"evidence\": \"D:\\\\oceanbase-competition\\\\powercontext\\\\minimax\\\\.runtime\\\\delivery-check\\\\.runtime\\\\delivery-replay\\\\evidence\", \"summary\": {\"run_id\": \"delivery-replay\", \"started_at_utc\": \"2026-11-07T19:20:11.079065+00:00\", \"model_invoked\": false, \"parent_pid\": 10652, \"resume_pid\": 17452, \"final_resume_pid\": 20924, \"database_version\": \"5.7.25-OceanBase seekdb-v1.4.0.0\", \"dependencies\": {\"powercontext\": \"1.5.0\", \"PyMySQL\": \"1.2.0\", \"httpx\": \"0.28.1\", \"pytest\": \"8.3.5\"}, \"python\": \"3.12.14 (main, Sep  1 2026, 14:17:39) [MSC v.1944 64 bit (AMD64)]\", \"target_before_exit\": 1, \"regression_before_exit\": 0, \"target_after_exit\": 0, \"regression_after_exit\": 0, \"tests_unchanged\": true, \"spec_revision\": 2, \"powercontext_final_revision\": 2, \"code_sha256\": \"f455460b4846bd29d778a6ed1d4222ca612be52a5a3eb884e71d2a82f4a4eedc\"}}\n",
+  "stderr": "",
+  "copied_local_config": false,
+  "copied_runtime_state": false,
+  "model_key_supplied": false,
+  "interpreter": "same pinned Python virtual environment; source and state directories are fresh",
+  "delivered_module_sha256": {
+    "__init__.py": "0aca38f66399a4bcd9cb1c9181487fd05b91743efa7cb17dd360fef0321ff657",
+    "__main__.py": "c1c96c2c4260f9f2b7b78cbb0d71d9d0514b27429b007b09f41c0b15f1062dd8",
+    "config.py": "7e24fe25453e937cd17d909348dce2f993581d0a1c3f00507f6d4a721f7491b0",
+    "model.py": "70e2701b42724e67ac807fa11cd842b40a042f416474105b0d9bc647c36750e8",
+    "state.py": "85879d1212a1a6ac829a10a6313a95879fdf1414d0b350c8969243005109ad55",
+    "store.py": "075e48118347dc1611cd761184eadf8840351428ee2106c9ab2fef6af32c5564",
+    "workflow.py": "716c09ad0192a42349bc7d7113a8480fcd74c589e117d09aa5300a47d5c04194"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "task_id": "ticket-status-filter",
+  "description": "Implement ticket status filtering in ticket_app.py according to the latest S1-S4 specification, preserving R1-R5 compatibility. Only change ticket_app.py; do not change tests.",
+  "query": "ticket status filter",
+  "required_sources": ["specs/status.md", "ticket_app.py", "tests/test_status.py", "tests/test_regression.py"]
+}

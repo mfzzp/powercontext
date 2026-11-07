@@ -1,0 +1,37 @@
+[
+  {
+    "path": "specs/status.md",
+    "kind": "spec",
+    "sha256": "837e5a1337524c62bb5483fe1d6cf439304170a2735385e274af864180169139",
+    "revision": 2,
+    "changed": true
+  },
+  {
+    "path": "ticket_app.py",
+    "kind": "code",
+    "sha256": "5b41308ac698bf55a1d238d259745be5da6d2d766764b8c92f4f7a8b5c83d732",
+    "revision": 1,
+    "changed": false
+  },
+  {
+    "path": "tests/test_status.py",
+    "kind": "test",
+    "sha256": "17871850f439ebb250c377dae97f89d84ade9e3ebea1b09fddef525e00801e0a",
+    "revision": 1,
+    "changed": false
+  },
+  {
+    "path": "tests/test_regression.py",
+    "kind": "test",
+    "sha256": "3bad2cc80bdcf2b1bb0ee5480e54a4ec9159898d523c2da8e137ea8a4853c609",
+    "revision": 1,
+    "changed": false
+  },
+  {
+    "path": "specs/billing.md",
+    "kind": "spec",
+    "sha256": "84301141c686cd30f612033c3723726799aa873b9e25aa74d51bc8e614317991",
+    "revision": 1,
+    "changed": false
+  }
+]

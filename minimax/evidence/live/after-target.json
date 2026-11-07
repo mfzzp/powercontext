@@ -1,0 +1,25 @@
+{
+  "command": [
+    "python",
+    "-I",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "tests",
+    "-t",
+    ".",
+    "-p",
+    "test_status.py",
+    "-v"
+  ],
+  "cwd": "project",
+  "exit_code": 0,
+  "source_sha256": "f455460b4846bd29d778a6ed1d4222ca612be52a5a3eb884e71d2a82f4a4eedc",
+  "test_sha256": {
+    "test_regression.py": "3bad2cc80bdcf2b1bb0ee5480e54a4ec9159898d523c2da8e137ea8a4853c609",
+    "test_status.py": "17871850f439ebb250c377dae97f89d84ade9e3ebea1b09fddef525e00801e0a"
+  },
+  "stdout": "",
+  "stderr": "test_blank_status (tests.test_status.StatusTests.test_blank_status) ... ok\ntest_case_insensitive (tests.test_status.StatusTests.test_case_insensitive) ... ok\ntest_exact_status (tests.test_status.StatusTests.test_exact_status) ... ok\ntest_filter_before_limit (tests.test_status.StatusTests.test_filter_before_limit) ... ok\ntest_normalize_stored_status (tests.test_status.StatusTests.test_normalize_stored_status) ... ok\ntest_trim_status (tests.test_status.StatusTests.test_trim_status) ... ok\ntest_unknown_status (tests.test_status.StatusTests.test_unknown_status) ... ok\n\n----------------------------------------------------------------------\nRan 7 tests in 0.001s\n\nOK\n"
+}
