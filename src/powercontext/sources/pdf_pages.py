@@ -72,6 +72,18 @@ def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
         reader = PdfReader(io.BytesIO(value.content), strict=True)
         if reader.is_encrypted and not reader.decrypt(""):
             raise ValueError("PDF requires a non-empty password")
+        page_count = reader.root_object["/Pages"]["/Count"]
+        if not isinstance(page_count, int) or page_count < 0 or len(reader.pages) != page_count:
+            raise ValueError("PDF page tree has an inconsistent page count")
+        if reader.is_encrypted:
+            # pypdf's encrypted page iterator uses the declared count, so
+            # check for a hidden extra leaf through the flattened page tree.
+            try:
+                reader.get_page(page_count)
+            except IndexError:
+                pass
+            else:
+                raise ValueError("PDF page tree has an inconsistent page count")
         # Materialize all pages and all text before exposing any result.
         return tuple(
             PDFPageInput(
@@ -504,19 +516,15 @@ async def search_pdf_pages(memory: Any, question: str, limit: int = 10) -> tuple
         record for record in page.entries
         if len(record.entry.sources) == 1 and record.entry.sources[0].source_type == "pdf-page"
     ]
-    # Exact page identity and full page text come from the Source catalog; the
-    # entry text is only a fallback for a Memory facade that cannot reach it.
+    # Rank full Source pages when available. The exact identity comes from the
+    # entry's SourceRef and includes the revision digest.
     pages = await _source_pages(memory, getattr(page, "memory_ref", None))
     result: list[MemoryCitation] = []
-    seen: set[object] = set()
+    seen: set[str] = set()
     for index in _rank_pages(records, question, search_order, pages):
         record = records[index]
         source_id = record.entry.sources[0].source_id
-        known = pages.get(source_id)
-        # A Source id identifies a page even when the catalog is unavailable;
-        # identical text can legitimately occur on multiple physical pages.
-        page_key = (known[0], known[1]) if known is not None else source_id
-        if page_key in seen:
+        if source_id in seen:
             continue
         # Resolve the exact version through the same scoped public API before
         # returning its citation; never synthesize an entry or a revision.
@@ -524,7 +532,7 @@ async def search_pdf_pages(memory: Any, question: str, limit: int = 10) -> tuple
         if exact.entry.text != record.entry.text or exact.entry.sources != record.entry.sources:
             raise ValueError("PDF Memory citation did not resolve to its exact page")
         result.append(record.citation)
-        seen.add(page_key)
+        seen.add(source_id)
         if len(result) == limit:
             break
     return tuple(result)

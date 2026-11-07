@@ -7,6 +7,7 @@ import io
 import unittest
 from types import SimpleNamespace
 
+import pytest
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
@@ -77,6 +78,15 @@ class PDFParserTests(unittest.TestCase):
         for identifier in ("", "  ", "\t\n"):
             with self.subTest(identifier=identifier), self.assertRaises(ValueError):
                 parse_pdf_document(PDFDocumentInput(document_id=identifier, content=valid))
+
+    def test_inconsistent_page_tree_counts_fail_atomically(self):
+        for password in (None, ""):
+            raw = pdf_bytes(["first", "second"], password=password)
+            self.assertEqual(raw.count(b"/Count 2"), 1)
+            for wrong_count in (b"/Count 1", b"/Count 3"):
+                broken = raw.replace(b"/Count 2", wrong_count, 1)
+                with self.subTest(password=password, count=wrong_count), self.assertRaises(ValueError):
+                    parse_pdf_document(PDFDocumentInput(document_id="broken", content=broken))
 
 
 class PDFSourceTests(unittest.IsolatedAsyncioTestCase):
@@ -214,6 +224,54 @@ class PDFSearchTests(unittest.IsolatedAsyncioTestCase):
             await search_pdf_pages(memory, "What was ACME net revenue and operating income in 2022?", 2),
             (records[1].citation, records[0].citation),
         )
+
+
+@pytest.mark.asyncio
+async def test_search_distinguishes_pdf_revisions_after_restart(tmp_path):
+    from powercontext.builtin.artifacts.memory import MemoryEntryInput
+    from powercontext.builtin.persistence.sqlite import SQLiteConfig
+    from powercontext.builtin.runtime import (
+        BuiltinConfig,
+        GetMemoryEntryRequest,
+        SubmitSourceObservation,
+        open_builtin_runtime,
+    )
+    from powercontext.builtin.scope import ScopeDraft
+
+    class PDFEvidencePipeline:
+        async def extract(self, request, /):
+            return tuple(
+                MemoryEntryInput(
+                    kind="source-evidence",
+                    text=source.projection(TEXT_EVIDENCE_PROJECTION_KEY)["content"],
+                    sources=(source,),
+                )
+                for source in request.sources
+            )
+
+    definition = PDF_PAGE_SOURCE_DEFINITION
+    registry = SourceDefinitionRegistry((definition,))
+    revisions = [
+        parse_pdf_document(PDFDocumentInput(document_id="Report", content=pdf_bytes([text])))[0]
+        for text in ("Revenue 100", "Revenue 200")
+    ]
+    config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'revisions.db'}"))
+    async with open_builtin_runtime(config, candidate_pipeline=PDFEvidencePipeline()) as runtime:
+        scope = await runtime.scopes.create(ScopeDraft(title="Revisions", summary="PDF pages", idempotency_key="pdf"))
+        await runtime.ingestion.register(manifest_for_definition(definition))
+        for page in revisions:
+            source = project_source_for_transport(registry, await registry.resolve(page))
+            await runtime.ingestion.submit(SubmitSourceObservation(scope_id=scope.scope_id, observation=source))
+        await runtime.memory.for_scope(scope.scope_id).flush()
+
+    async with open_builtin_runtime(config) as runtime:
+        memory = runtime.memory.for_scope(scope.scope_id)
+        citations = await search_pdf_pages(memory, "Revenue", limit=2)
+        entries = [(await memory.get(GetMemoryEntryRequest(citation=citation))).entry for citation in citations]
+        assert {entry.text for entry in entries} == {"Report\nRevenue 100", "Report\nRevenue 200"}
+        assert {entry.sources[0].source_id for entry in entries} == {
+            (await registry.resolve(page)).name for page in revisions
+        }
 
 
 if __name__ == "__main__":
