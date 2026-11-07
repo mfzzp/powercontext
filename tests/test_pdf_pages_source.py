@@ -253,6 +253,60 @@ class PDFSearchTests(unittest.IsolatedAsyncioTestCase):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("table", [
+    "Net sales\n1,200 1,100\nOperating profit\n120 99",
+    "Net sales (a) 1,200 1,100\nOperating profit (b) 120 99",
+    "Net\nsales\n1,200 1,100\nOperating\nprofit\n120 99",
+    "Operating margin 10.0 % 9.0 %",
+    "Operating margin\n10.0 %\n9.0 %",
+])
+async def test_margin_evidence_survives_pdf_table_layout(table):
+    memory, records = PDFSearchTests().memory([
+        *[
+            f"ACME_2022_10K\nOperating margin discussion {i}\n"
+            "Operating margin improved as operating income, net revenue and sales increased. "
+            "The change in operating margin reflects operating results and costs."
+            for i in range(24)
+        ],
+        f"ACME_2022_10K\nFinancial results\n{table}",
+    ])
+    citations = await search_pdf_pages(memory, "How did Acme's operating margin change in 2022?", 20)
+    assert records[-1].citation in citations
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disclosure", [
+    "Trading Symbol(s) ZQR",
+    "Title of each class Trading Symbols Name of each exchange on which registered\n"
+    "Common Stock, par value $0.01 ZQR The Nasdaq Stock Market LLC",
+    "Title of each class\nTrading Symbol(s)\nName of each exchange on which registered\n"
+    "Common stock\nZQR\nNew York Stock Exchange",
+])
+async def test_ticker_evidence_survives_pdf_cover_layout(disclosure):
+    memory, records = PDFSearchTests().memory([
+        *[
+            f"OTHER_2022_10K\nConsolidated statements of income\nNet income {100+i} 110\nProfit 50 40"
+            for i in range(24)
+        ],
+        f"NORTHWIND_2022_10K\n{disclosure}",
+        "NORTHWIND_2022_10K\nProfit 100",
+    ])
+    citations = await search_pdf_pages(memory, "What was ZQR net income in 2022?", 20)
+    assert records[-1].citation in citations
+
+
+@pytest.mark.asyncio
+async def test_ticker_in_prose_does_not_identify_another_issuer():
+    memory, records = PDFSearchTests().memory([
+        "NORTHWIND_2022_10K\nTrading Symbol(s): ZQR",
+        "NORTHWIND_2022_10K\nProfit 100",
+        "OTHER_2022_10K\nConsolidated statements of income. Net income 500.\n"
+        "Our investment in ZQR trades on the New York Stock Exchange.",
+    ])
+    assert await search_pdf_pages(memory, "What was ZQR net income?", 1) == (records[1].citation,)
+
+
+@pytest.mark.asyncio
 async def test_search_distinguishes_pdf_revisions_after_restart(tmp_path):
     from powercontext.builtin.artifacts.memory import MemoryEntryInput
     from powercontext.builtin.persistence.sqlite import SQLiteConfig
