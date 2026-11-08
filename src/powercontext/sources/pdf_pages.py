@@ -218,6 +218,11 @@ def _query_weights(question: str) -> dict[str, float]:
         if terms.intersection(_terms(triggers)):
             for term in _terms(expansion):
                 weights.setdefault(term, 1.0)
+    if "capital" in terms and terms.intersection({"intensive", "intensity"}):
+        # A capital-intensity question often needs figures for investment in
+        # productive assets, even when the filing never uses that term.
+        for term in _terms("capex expenditures purchases additions property plant equipment depreciation"):
+            weights.setdefault(term, 1.0)
     return weights
 
 
@@ -390,10 +395,19 @@ _MARGIN_NUMERATORS = {
     "net": {"net income", "net profit", "net earning"},
 }
 _REVENUE_LABELS = {"revenue", "net revenue", "sale", "net sale"}
+_SALES_COST_RATIO = re.compile(
+    r"\bcost(?:\s+of)?\s+(?:(?:goods|products)\s+sold|sales|revenue)\b"
+    r"[^.;]{0,100}\b(?:percent(?:age)?|proportion|ratio)\s+(?:of|to)\s+"
+    r"(?:(?:net|total)\s+)?(?:sales|revenues?)\b", re.IGNORECASE,
+)
 
 
 def _margin_table_strength(body: str, kinds: set[str]) -> int:
     """Recognize numeric margin rows, or the numerator and revenue rows together."""
+    # Gross margin is also explained through the complementary cost-to-sales
+    # ratio. Filings can discuss its drivers without saying "gross margin".
+    if "gross" in kinds and _SALES_COST_RATIO.search(body):
+        return 2
     labels = set()
     lines = [line.strip() for line in body.splitlines() if line.strip()]
     for start in range(len(lines)):
