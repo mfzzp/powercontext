@@ -139,6 +139,10 @@ def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
         raise ValueError("PDF document_id must not be blank")
     if not value.content or b"%PDF-" not in value.content[:1024]:
         raise ValueError("Input is not a PDF document")
+    # Even strict pypdf parsing recovers a truncated %%EOF marker and returns
+    # pages. Require a complete final revision before accepting any page.
+    if not value.content.rstrip(b"\x00\t\n\x0c\r ").endswith(b"%%EOF"):
+        raise ValueError("PDF end-of-file marker is missing or truncated")
     digest = hashlib.sha256(value.content).hexdigest()
     try:
         # Strict parsing keeps the contract atomic: a PDF whose cross-reference
