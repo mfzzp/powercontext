@@ -321,14 +321,23 @@ def _query_weights(question: str) -> dict[str, float]:
 
 
 _CORPORATE_WORDS = frozenset("inc incorporated corp corporation company co ltd limited plc llc holdings group".split())
+_REPORT_WORDS = frozenset("earnings release press quarterly results".split())
+
+
+def _document_company(document_id: str) -> tuple[str, ...]:
+    # A quarter or filing type describes the report, not a different issuer.
+    company = re.sub(
+        r"(?:19|20)\d{2}(?:[\W_]*q[1-4])?|10[\W_]*[kq](?![a-z0-9])",
+        " ", document_id.lower(),
+    )
+    return tuple(part for part in re.findall(r"\d+[a-z]+|[a-z]+", company)
+                 if part not in _STOP_WORDS and part not in _CORPORATE_WORDS and part not in _REPORT_WORDS)
 
 
 def _document_matches(document_id: str, question: str) -> bool:
     # Infer an entity only from the supplied ID, with word boundaries. In
     # particular, INC must not match income, nor AIR match impairment.
-    company = re.sub(r"(?:19|20)\d{2}|10[\W_]*[kq](?![a-z0-9])", " ", document_id.lower())
-    parts = [part for part in re.findall(r"\d+[a-z]+|[a-z]+", company)
-             if part not in _STOP_WORDS and part not in _CORPORATE_WORDS]
+    parts = _document_company(document_id)
     if not parts:
         return False
     pattern = r"(?<![a-z0-9])" + r"[\W_]*".join(map(re.escape, parts)) + r"(?![a-z0-9])"
@@ -559,6 +568,34 @@ def _inventory_turnover_table_strength(body: str) -> int:
     return 0
 
 
+def _capital_intensity_table_strength(body: str) -> int:
+    """Locate investment, productive assets and revenue in primary statements."""
+    title = set(_terms(_opening(body)[:450]))
+    balance_sheet = {"balance", "sheet"}.issubset(title)
+    income_statement = "statement" in title and bool(title.intersection({"income", "earning", "operation"}))
+    cash_flow = {"cash", "flow"}.issubset(title)
+    if not (balance_sheet or income_statement or cash_flow):
+        return 0
+    lines = [line.strip() for line in body.splitlines() if line.strip()]
+    for start in range(len(lines)):
+        for width in range(1, min(3, len(lines) - start) + 1):
+            row = _NUMERIC_ROW.fullmatch(" ".join(lines[start:start + width]))
+            if row is None or not any(character.isdigit() for character in row[0][row.end(1):]):
+                continue
+            label = set(_terms(row[1]))
+            if balance_sheet and label.intersection({"property", "plant", "equipment", "asset"}):
+                return 1
+            if income_statement and label.intersection({"revenue", "sale"}):
+                return 1
+            if cash_flow and (
+                {"capital", "expenditure"}.issubset(label)
+                or (label.intersection({"purchase", "addition", "expenditure"})
+                    and label.intersection({"property", "plant", "equipment"}))
+            ):
+                return 1
+    return 0
+
+
 def _fuse_table_evidence(
     scored: list[tuple[bool, float, int]],
     bodies: list[str],
@@ -676,12 +713,18 @@ def _rank_pages(
     query_terms = set(_query_terms(question))
     report_ids = set(documents)
     exact_matches = {document_id for document_id in report_ids if _document_matches(document_id, question)}
-    preferred_report = next(iter(exact_matches)) if len(exact_matches) == 1 else None
+    preferred_reports = exact_matches
     if not exact_matches:
-        preferred_report = _ticker_report(documents, bodies, question)
+        ticker_report = _ticker_report(documents, bodies, question)
+        if ticker_report is not None:
+            company = _document_company(ticker_report)
+            preferred_reports = (
+                {document_id for document_id in report_ids if _document_company(document_id) == company}
+                if company else {ticker_report}
+            )
     alias_matches = (
         {document_id for document_id in report_ids if _alias_matches(document_id, question)}
-        if not exact_matches and preferred_report is None else set()
+        if not preferred_reports else set()
     )
     idfs = {term: math.log(1.0 + (len(records) - frequency[term] + 0.5) / (frequency[term] + 0.5))
             for term in weights}
@@ -740,9 +783,9 @@ def _rank_pages(
         rank = search_order.get(records[index].entry.entry_id)
         if rank is not None:
             score += 0.05 / (1 + rank)
-        # Reserve the front of the result for a uniquely named report while
-        # keeping other reports available when it has fewer matching pages.
-        routed = documents[index] == preferred_report and score > 0.0
+        # Route to the issuer's reports together. A symbol disclosed on an
+        # annual cover must not hide its quarterly release or earnings outlook.
+        routed = documents[index] in preferred_reports and score > 0.0
         scored.append((routed, score, index))
     scored.sort(key=lambda item: (not item[0], -item[1], item[2]))
     margin_kinds = query_terms.intersection(_MARGIN_NUMERATORS)
@@ -752,6 +795,8 @@ def _rank_pages(
         scored = _fuse_table_evidence(scored, bodies, _effective_tax_rate_table_strength)
     if {"inventory", "turnover"}.issubset(query_terms):
         scored = _fuse_table_evidence(scored, bodies, _inventory_turnover_table_strength)
+    if "capital" in query_terms and query_terms.intersection({"intensive", "intensity"}):
+        scored = _fuse_table_evidence(scored, bodies, _capital_intensity_table_strength)
     return [index for _, _, index in scored]
 
 
