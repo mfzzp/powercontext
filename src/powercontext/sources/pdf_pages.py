@@ -242,6 +242,35 @@ _TICKER_DECLARATION = re.compile(
     r"\b(?i:trad(?:e|es|ed|ing)\s+under\s+(?:the\s+)?(?:ticker\s+)?symbol"
     r"|(?:trading|ticker)\s+symbol(?:s|\(s\))?[ \t]*:)\s*[\"'“‘]?([A-Z][A-Z0-9]{1,5})\b"
 )
+_TICKER_LABEL = re.compile(
+    r"^\s*(?i:(?:trading|ticker)\s+symbol(?:s|\(s\))?)\s*:?\s*"
+    r"[\"'“‘]?([A-Z][A-Z0-9]{1,5})[\"'”’]?\s*$", re.MULTILINE,  # noqa: RUF001 - PDF quotation marks
+)
+_TICKER_TABLE_HEADING = re.compile(r"\btrading\s+symbol(?:s|\(s\))?", re.IGNORECASE)
+_TICKER_TABLE_ROW = re.compile(
+    r"\b([A-Z][A-Z0-9]{1,5})\s+(?i:(?:the\s+)?(?:nasdaq\b|nyse\b|"
+    r"(?:[a-z]+\s+){1,5}stock\s+(?:exchange|market)\b))"
+)
+
+
+def _disclosed_tickers(body: str) -> set[str]:
+    """Read issuer symbols from explicit declarations or SEC cover tables."""
+    symbols = set(_TICKER_DECLARATION.findall(body))
+    symbols.update(_TICKER_LABEL.findall(body))
+    for heading in _TICKER_TABLE_HEADING.finditer(body):
+        header = body[max(0, heading.start() - 200):heading.end() + 300]
+        if (re.search(r"title\s+of\s+each\s+class", header, re.IGNORECASE) is None
+                or re.search(r"name\s+of\s+each\s+exchange", header, re.IGNORECASE) is None):
+            continue
+        table = body[heading.end():heading.end() + 3000]
+        table = re.split(
+            r"\b(?:securities\s+registered|indicate\s+by\s+check\s+mark)\b",
+            table, maxsplit=1, flags=re.IGNORECASE,
+        )[0]
+        # A symbol must occupy the column immediately before an exchange name.
+        # An unrelated mention of a listed investment is not an issuer alias.
+        symbols.update(_TICKER_TABLE_ROW.findall(table))
+    return symbols
 
 
 def _ticker_report(documents: list[str], bodies: list[str], question: str) -> str | None:
@@ -251,7 +280,7 @@ def _ticker_report(documents: list[str], bodies: list[str], question: str) -> st
         return None
     matches = {
         document_id for document_id, body in zip(documents, bodies, strict=True)
-        if document_id and symbols.intersection(_TICKER_DECLARATION.findall(body))
+        if document_id and symbols.intersection(_disclosed_tickers(body))
     }
     return next(iter(matches)) if len(matches) == 1 else None
 
@@ -351,9 +380,10 @@ def _statement_weight(title: set[str], query: set[str]) -> float:
     return 1.9
 
 
-_ROW_VALUE = r"(?:\(?[+−-]?(?:[$€£]\s*)?\d[\d,]*(?:\.\d+)?%?\)?|[—–-])"
+_ROW_VALUE = r"(?:\(?[+−-]?(?:[$€£]\s*)?\d[\d,]*(?:\.\d+)?(?:\s*%)?\)?|[—–-])"
 _NUMERIC_ROW = re.compile(rf"^\s*([A-Za-z].{{0,95}}?)\s+{_ROW_VALUE}(?:\s+{_ROW_VALUE})*\s*$")
 _EFFECTIVE_TAX_RATE = re.compile(r"\beffective\s+(?:income\s+)?tax\s+rates?\b", re.IGNORECASE)
+_ROW_FOOTNOTE = re.compile(r"\((?:[a-z]|\d{1,2})\)|\[(?:[a-z]|\d{1,2})\]|[*†‡]+", re.IGNORECASE)
 _MARGIN_NUMERATORS = {
     "operation": {"operation income", "operation profit", "operation earning", "income operation"},
     "gross": {"gross profit", "gross income", "gross earning"},
@@ -365,10 +395,17 @@ _REVENUE_LABELS = {"revenue", "net revenue", "sale", "net sale"}
 def _margin_table_strength(body: str, kinds: set[str]) -> int:
     """Recognize numeric margin rows, or the numerator and revenue rows together."""
     labels = set()
-    for line in body.splitlines():
-        row = _NUMERIC_ROW.fullmatch(line)
-        if row is not None and any(character.isdigit() for character in line[row.end(1):]):
-            labels.add(" ".join(_terms(row[1])).removeprefix("total "))
+    lines = [line.strip() for line in body.splitlines() if line.strip()]
+    for start in range(len(lines)):
+        # pypdf may place a label, a wrapped label continuation and its numeric
+        # cells on separate lines. Join only a small local window for ranking;
+        # the captured page and the text returned through citations stay intact.
+        for width in range(1, min(3, len(lines) - start) + 1):
+            line = " ".join(lines[start:start + width])
+            row = _NUMERIC_ROW.fullmatch(line)
+            if row is not None and any(character.isdigit() for character in line[row.end(1):]):
+                label = _ROW_FOOTNOTE.sub(" ", row[1])
+                labels.add(" ".join(_terms(label)).removeprefix("total "))
     if any(f"{kind} margin" in labels or f"{kind} profit margin" in labels for kind in kinds):
         return 2
     if labels.intersection(_REVENUE_LABELS) and any(labels.intersection(_MARGIN_NUMERATORS[k]) for k in kinds):
