@@ -7,12 +7,14 @@ import io
 import json
 import math
 import re
+import zlib
 from collections import Counter
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
-from pypdf import PdfReader
+from pypdf import PdfReader, get_configuration
+from pypdf.generic import ArrayObject, EncodedStreamObject, NameObject, NullObject, StreamObject
 
 from powercontext.artifacts import MemoryCitation
 from powercontext.sources.definitions import SourceDefinition
@@ -60,6 +62,78 @@ def _page_identity(value: PDFPageInput) -> str:
     return f"pdf:{hashlib.sha256(encoded).hexdigest()}"
 
 
+def _validate_text_stream(value: Any, checked: set[int]) -> None:
+    """Reject damaged compressed text rather than pypdf's partial recovery."""
+    if value is None:
+        return
+    stream = value.get_object()
+    if isinstance(stream, NullObject):
+        return
+    if isinstance(stream, ArrayObject):
+        for item in stream:
+            _validate_text_stream(item, checked)
+        return
+    if not isinstance(stream, StreamObject):
+        raise ValueError("PDF text content must be a stream")
+    if id(stream) in checked:
+        return
+    checked.add(id(stream))
+    filters = stream.get("/Filter")
+    if filters is None:
+        return
+    filters = filters.get_object()
+    filters = list(filters) if isinstance(filters, ArrayObject) else [filters]
+    for index, filter_name in enumerate(filters):
+        if filter_name not in ("/FlateDecode", "/Fl"):
+            continue
+        data = stream._data
+        if index:
+            # Decode only the filters preceding Flate, preserving their params.
+            prefix = EncodedStreamObject()
+            prefix._data = data
+            prefix[NameObject("/Filter")] = ArrayObject(filters[:index])
+            parameters = stream.get("/DecodeParms")
+            if parameters is not None:
+                parameters = parameters.get_object()
+                prefix[NameObject("/DecodeParms")] = (
+                    ArrayObject(parameters[:index]) if isinstance(parameters, ArrayObject) else parameters
+                )
+            data = prefix.get_data()
+        decoder = zlib.decompressobj()
+        produced = 0
+        maximum = get_configuration().zlib_maximum_output_length
+        for offset in range(0, len(data), 65536):
+            pending = data[offset:offset + 65536]
+            while pending:
+                produced += len(decoder.decompress(pending, 65536))
+                if maximum and produced > maximum:
+                    raise ValueError("PDF text stream exceeds the decoder limit")
+                pending = decoder.unconsumed_tail
+        if not decoder.eof:
+            raise ValueError("PDF text stream is truncated")
+
+
+def _validate_text_resources(page: Any, checked: set[int]) -> None:
+    resources = page.get("/Resources")
+    if resources is None:
+        return
+    resources = resources.get_object()
+    if isinstance(resources, NullObject) or id(resources) in checked:
+        return
+    checked.add(id(resources))
+    fonts = resources.get("/Font", {})
+    fonts = fonts.get_object() if hasattr(fonts, "get_object") else fonts
+    for font in fonts.values():
+        _validate_text_stream(font.get_object().get("/ToUnicode"), checked)
+    xobjects = resources.get("/XObject", {})
+    xobjects = xobjects.get_object() if hasattr(xobjects, "get_object") else xobjects
+    for reference in xobjects.values():
+        form = reference.get_object()
+        if form.get("/Subtype") == "/Form":
+            _validate_text_stream(form, checked)
+            _validate_text_resources(form, checked)
+
+
 def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
     if not value.document_id.strip():
         raise ValueError("PDF document_id must not be blank")
@@ -85,6 +159,10 @@ def parse_pdf_document(value: PDFDocumentInput) -> tuple[PDFPageInput, ...]:
                 pass
             else:
                 raise ValueError("PDF page tree has an inconsistent page count")
+        checked: set[int] = set()
+        for page in reader.pages:
+            _validate_text_stream(page.get("/Contents"), checked)
+            _validate_text_resources(page, checked)
         # Materialize all pages and all text before exposing any result.
         return tuple(
             PDFPageInput(
@@ -242,7 +320,7 @@ def _document_matches(document_id: str, question: str) -> bool:
 
 
 _ALIAS_TOKEN = re.compile(r"\b[A-Z]{3,6}\b")
-_TICKER_TOKEN = re.compile(r"\b[A-Z][A-Z0-9]{1,5}\b")
+_TICKER_TOKEN = re.compile(r"\b[A-Z][A-Z0-9]{1,5}\b", re.IGNORECASE)
 _TICKER_DECLARATION = re.compile(
     r"\b(?i:trad(?:e|es|ed|ing)\s+under\s+(?:the\s+)?(?:ticker\s+)?symbol"
     r"|(?:trading|ticker)\s+symbol(?:s|\(s\))?[ \t]*:)\s*[\"'“‘]?([A-Z][A-Z0-9]{1,5})\b"
@@ -280,7 +358,9 @@ def _disclosed_tickers(body: str) -> set[str]:
 
 def _ticker_report(documents: list[str], bodies: list[str], question: str) -> str | None:
     """Route on a symbol disclosed in the supplied reports, when unambiguous."""
-    symbols = set(_TICKER_TOKEN.findall(question))
+    # User spelling need not share the cover table's capitalization. Only a
+    # symbol actually disclosed by a single supplied issuer can route a query.
+    symbols = {token.upper() for token in _TICKER_TOKEN.findall(question) if token.lower() not in _STOP_WORDS}
     if not symbols:
         return None
     matches = {
@@ -438,6 +518,27 @@ def _effective_tax_rate_table_strength(body: str) -> int:
         row = _NUMERIC_ROW.fullmatch(line)
         if row is not None and _EFFECTIVE_TAX_RATE.fullmatch(" ".join(_terms(row[1]))):
             if any(character.isdigit() for character in line[row.end(1):]):
+                return 1
+    return 0
+
+
+def _inventory_turnover_table_strength(body: str) -> int:
+    """Find the two reported operands of inventory turnover, not just its name."""
+    title = set(_terms(_opening(body)[:450]))
+    balance_sheet = {"balance", "sheet"}.issubset(title)
+    income_statement = "statement" in title and bool(title.intersection({"income", "earning", "operation"}))
+    if not (balance_sheet or income_statement):
+        return 0
+    lines = [line.strip() for line in body.splitlines() if line.strip()]
+    for start in range(len(lines)):
+        for width in range(1, min(3, len(lines) - start) + 1):
+            row = _NUMERIC_ROW.fullmatch(" ".join(lines[start:start + width]))
+            if row is None or not any(character.isdigit() for character in row[0][row.end(1):]):
+                continue
+            label = " ".join(_terms(row[1])).removeprefix("total ")
+            if balance_sheet and label.split()[:1] == ["inventory"]:
+                return 1
+            if income_statement and re.match(r"cost (?:good sold|product sold|sale|revenue)\b", label):
                 return 1
     return 0
 
@@ -633,6 +734,8 @@ def _rank_pages(
         scored = _fuse_table_evidence(scored, bodies, lambda body: _margin_table_strength(body, margin_kinds))
     if _EFFECTIVE_TAX_RATE.search(question):
         scored = _fuse_table_evidence(scored, bodies, _effective_tax_rate_table_strength)
+    if {"inventory", "turnover"}.issubset(query_terms):
+        scored = _fuse_table_evidence(scored, bodies, _inventory_turnover_table_strength)
     return [index for _, _, index in scored]
 
 
