@@ -292,8 +292,18 @@ def _terms(text: str) -> list[str]:
     return [_stem(term) for term in _TOKEN.findall(text.lower()) if term not in _STOP_WORDS]
 
 
+def _query_terms(question: str) -> list[str]:
+    terms = _terms(question)
+    # Recognise the financial phrase before "investment" is removed as prompt
+    # boilerplate. Investment in working capital is a different concept.
+    capital_phrases = re.sub(r"\bworking\s+capital\s+investments?\b", "", question, flags=re.IGNORECASE)
+    if re.search(r"\bcapital\s+investments?\b", capital_phrases, re.IGNORECASE):
+        terms.append("capex")
+    return terms
+
+
 def _query_weights(question: str) -> dict[str, float]:
-    terms = set(_terms(question))
+    terms = set(_query_terms(question))
     weights = {
         term: 0.2 if re.fullmatch(r"(?:19|20)\d{2}", term) else 0.7 if term.isdigit() else 1.0
         for term in terms
@@ -663,7 +673,7 @@ def _rank_pages(
         frequency.update(count.keys())
     average = sum(map(len, token_lists)) / len(records) or 1.0
     weights = _query_weights(question)
-    query_terms = set(_terms(question))
+    query_terms = set(_query_terms(question))
     report_ids = set(documents)
     exact_matches = {document_id for document_id in report_ids if _document_matches(document_id, question)}
     preferred_report = next(iter(exact_matches)) if len(exact_matches) == 1 else None
