@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import math
 import re
 import zlib
@@ -16,6 +17,7 @@ from pydantic import BaseModel
 from pypdf import PdfReader, get_configuration
 from pypdf.generic import ArrayObject, EncodedStreamObject, NameObject, NullObject, StreamObject
 
+from powercontext._logging import log_safely
 from powercontext.artifacts import MemoryCitation
 from powercontext.sources.definitions import SourceDefinition
 from powercontext.sources.models import Source, SourceMaterialization
@@ -754,8 +756,21 @@ async def search_pdf_pages(memory: Any, question: str, limit: int = 10) -> tuple
     from powercontext.builtin.runtime import GetMemoryEntryRequest, SearchMemoryRequest
 
     # Force offline lexical search, even if the deployment has model credentials.
-    hits = await memory.search(SearchMemoryRequest(query=_retrieval_query(question), limit=min(100, max(20, limit * 4)), mode="fts"))
-    search_order = {hit.entry_id: rank for rank, hit in enumerate(hits.hits)}
+    request = SearchMemoryRequest(
+        query=_retrieval_query(question), limit=min(100, max(20, limit * 4)), mode="fts"
+    )
+    search_order: dict[str, int] = {}
+    try:
+        hits = await memory.search(request)
+    except Exception as error:  # noqa: BLE001 - FTS supplies only an optional ranking hint
+        log_safely(
+            logging.getLogger(__name__),
+            logging.WARNING,
+            "PDF FTS hint unavailable; ranking scoped Memory records",
+            extra={"event": "pdf.search.fts_fallback", "error_type": type(error).__name__},
+        )
+    else:
+        search_order = {hit.entry_id: rank for rank, hit in enumerate(hits.hits)}
     # Public scoped listing supplies corpus statistics and avoids dropping a page
     # solely because a long natural-language query fails FTS admission thresholds.
     # All candidates and all references remain real active Memory records.
