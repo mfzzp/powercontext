@@ -8,6 +8,7 @@ import json
 import math
 import re
 from collections import Counter
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
@@ -352,6 +353,7 @@ def _statement_weight(title: set[str], query: set[str]) -> float:
 
 _ROW_VALUE = r"(?:\(?[+−-]?(?:[$€£]\s*)?\d[\d,]*(?:\.\d+)?%?\)?|[—–-])"
 _NUMERIC_ROW = re.compile(rf"^\s*([A-Za-z].{{0,95}}?)\s+{_ROW_VALUE}(?:\s+{_ROW_VALUE})*\s*$")
+_EFFECTIVE_TAX_RATE = re.compile(r"\beffective\s+(?:income\s+)?tax\s+rates?\b", re.IGNORECASE)
 _MARGIN_NUMERATORS = {
     "operation": {"operation income", "operation profit", "operation earning", "income operation"},
     "gross": {"gross profit", "gross income", "gross earning"},
@@ -374,15 +376,32 @@ def _margin_table_strength(body: str, kinds: set[str]) -> int:
     return 0
 
 
-def _fuse_margin_tables(
-    scored: list[tuple[bool, float, int]], bodies: list[str], kinds: set[str],
+def _effective_tax_rate_table_strength(body: str) -> int:
+    for line in body.splitlines():
+        if _EFFECTIVE_TAX_RATE.match(line.lstrip()) is None:
+            continue
+        # PDF extraction can insert spaces before percent signs. A comparison
+        # column may also report the change in basis points.
+        line = re.sub(r"(?<=\d)[ \t]+%", "%", line)
+        line = re.sub(r"\s*(?:bps|basis points)\s*$", "", line, flags=re.IGNORECASE)
+        row = _NUMERIC_ROW.fullmatch(line)
+        if row is not None and _EFFECTIVE_TAX_RATE.fullmatch(" ".join(_terms(row[1]))):
+            if any(character.isdigit() for character in line[row.end(1):]):
+                return 1
+    return 0
+
+
+def _fuse_table_evidence(
+    scored: list[tuple[bool, float, int]],
+    bodies: list[str],
+    table_strength: Callable[[str], int],
 ) -> list[tuple[bool, float, int]]:
     # Rank actual numeric rows separately from prose so a short statement can
     # surface even when many discussion pages repeat the question's wording.
     tables = []
     for lexical_rank, (_, _, index) in enumerate(scored, 1):
         if not _is_contents_page(bodies[index]):
-            strength = _margin_table_strength(bodies[index], kinds)
+            strength = table_strength(bodies[index])
             if strength:
                 tables.append((-strength, lexical_rank, index))
     if not tables:
@@ -560,7 +579,9 @@ def _rank_pages(
     scored.sort(key=lambda item: (not item[0], -item[1], item[2]))
     margin_kinds = query_terms.intersection(_MARGIN_NUMERATORS)
     if "margin" in query_terms and margin_kinds:
-        scored = _fuse_margin_tables(scored, bodies, margin_kinds)
+        scored = _fuse_table_evidence(scored, bodies, lambda body: _margin_table_strength(body, margin_kinds))
+    if _EFFECTIVE_TAX_RATE.search(question):
+        scored = _fuse_table_evidence(scored, bodies, _effective_tax_rate_table_strength)
     return [index for _, _, index in scored]
 
 
